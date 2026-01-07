@@ -1,0 +1,195 @@
+@import "tailwindcss";
+
+/* CSS Variables for Light and Dark Themes */
+:root[data-theme="light"] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8f9fa;
+  --bg-tertiary: #e9ecef;
+  --text-primary: #1a202c;
+  --text-secondary: #4b5563;
+  --text-tertiary: #6c757d;
+  --border-color: #e9ecef;
+  --primary-color: #2563eb;
+  --hover-bg: #eff6ff;
+  --card-bg: #ffffff;
+  --card-shadow: rgba(0, 0, 0, 0.04);
+  --card-shadow-hover: rgba(0, 0, 0, 0.07);
+  --toggle-bg: #f3f4f6;
+  --toggle-border: #e5e7eb;
+  --toggle-hover-bg: #e5e7eb;
+}
+
+:root[data-theme="dark"] {
+  --bg-primary: #1a1a1a;
+  --bg-secondary: #000000;
+  --bg-tertiary: #2a2a2a;
+  --text-primary: #ffffff;
+  --text-secondary: #b0b0b0;
+  --text-tertiary: #808080;
+  --border-color: #3a3a3a;
+  --primary-color: #60a5fa;
+  --hover-bg: #2a2a2a;
+  --card-bg: #1a1a1a;
+  --card-shadow: rgba(0, 0, 0, 0.5);
+  --card-shadow-hover: rgba(0, 0, 0, 0.7);
+  --toggle-bg: #2a2a2a;
+  --toggle-border: #3a3a3a;
+  --toggle-hover-bg: #333333;
+}
+
+/* Global App Layout */
+.app-container {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+  background-color: var(--bg-secondary);
+  transition: background-color 0.3s ease;
+}
+
+/* Main Content Area */
+.main-content {
+  flex: 1;
+  margin-left: 140px;
+  height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-top: 16px;
+  background-color: var(--bg-secondary);
+  transition: background-color 0.3s ease;
+}
+
+/* Page Layout */
+.page-container {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.page-header {
+  background-color: var(--bg-primary);
+  border-bottom: 1px solid var(--border-color);
+  padding: 32px 48px 24px;
+  border-radius: 10px 10px 4px 4px;
+  transition: background-color 0.3s ease, border-color 0.3s ease;
+}
+
+.page-title {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 8px 0;
+  letter-spacing: -0.02em;
+  transition: color 0.3s ease;
+}
+
+.page-subtitle {
+  font-size: 15px;
+  color: var(--text-tertiary);
+  margin: 0;
+  font-weight: 400;
+  line-height: 1.5;
+  transition: color 0.3s ease;
+}
+
+.page-content {
+  flex: 1;
+  padding: 48px;
+  max-width: 1400px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* 12-Column Grid System */
+.grid-container {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.grid-col-1 { grid-column: span 1; }
+.grid-col-2 { grid-column: span 2; }
+.grid-col-3 { grid-column: span 3; }
+.grid-col-4 { grid-column: span 4; }
+.grid-col-5 { grid-column: span 5; }
+.grid-col-6 { grid-column: span 6; }
+.grid-col-7 { grid-column: span 7; }
+.grid-col-8 { grid-column: span 8; }
+.grid-col-9 { grid-column: span 9; }
+.grid-col-10 { grid-column: span 10; }
+.grid-col-11 { grid-column: span 11; }
+.grid-col-12 { grid-column: span 12; }
+
+/* Card/Widget Components */
+.widget-card {
+  background-color: var(--card-bg);
+  
+  border-radius: 8px;
+  padding: 24px;
+  box-shadow: 0 1px 3px var(--card-shadow);
+  transition: all 0.3s ease;
+}
+
+.widget-card:hover {
+  box-shadow: 0 4px 6px var(--card-shadow-hover);
+}
+
+.widget-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  transition: color 0.3s ease;
+  margin: 0 0 16px 0;
+}
+
+/* Responsive Design */
+@media (max-width: 1024px) {
+  .main-content {
+    margin-left: 80px;
+  }
+  
+  .page-header {
+    padding: 24px 32px 20px;
+  }
+  
+  .page-content {
+    padding: 32px;
+  }
+  
+  .page-title {
+    font-size: 24px;
+  }
+  
+  .grid-container {
+    gap: 16px;
+  }
+}
+
+@media (max-width: 768px) {
+  .page-header {
+    padding: 20px 24px 16px;
+  }
+  
+  .page-content {
+    padding: 24px;
+  }
+  
+  .page-title {
+    font-size: 22px;
+  }
+  
+  .page-subtitle {
+    font-size: 14px;
+  }
+  
+  .grid-container {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  
+  .grid-col-1, .grid-col-2, .grid-col-3, .grid-col-4,
+  .grid-col-5, .grid-col-6, .grid-col-7, .grid-col-8,
+  .grid-col-9, .grid-col-10, .grid-col-11, .grid-col-12 {
+    grid-column: span 1;
+  }
+}

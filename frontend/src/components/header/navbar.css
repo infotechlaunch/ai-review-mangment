@@ -1,0 +1,166 @@
+.navbar {
+    background-color: var(--bg-primary);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    padding: 0 2rem;
+    padding-bottom: 1rem;
+    margin-bottom: 1.5rem;
+    border-radius: 10px 10px 0 0;
+    transition: background-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.navbar-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    max-width: 1400px;
+    margin: 0 auto;
+    height: 70px;
+}
+
+.navbar-brand h2 {
+    margin: 0;
+    color: var(--text-primary);
+    font-family: 'Inter', sans-serif;
+    font-size: 1.5rem;
+    font-weight: 600;
+    transition: color 0.3s ease;
+}
+
+.navbar-menu {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+}
+
+.navbar-nav {
+    display: flex;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    gap: 2rem;
+}
+
+.nav-item {
+    margin: 0;
+}
+
+.nav-link {
+    text-decoration: none;
+    color: var(--text-secondary);
+    font-family: 'Inter', sans-serif;
+    font-size: 1rem;
+    font-weight: 500;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    transition: all 0.3s ease;
+}
+
+.nav-link:hover {
+    color: var(--primary-color);
+    background-color: var(--hover-bg);
+}
+
+.navbar-profile {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+/* Theme Toggle Button */
+.theme-toggle-icon {
+    background-color: transparent;
+    border: none;
+    border-radius: 8px;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    padding: 0;
+    outline: none;
+    color: var(--text-secondary);
+}
+
+.theme-toggle-icon:hover {
+    background-color: var(--hover-bg);
+    color: var(--text-primary);
+}
+
+.theme-toggle-icon:active {
+    transform: scale(0.95);
+}
+
+.theme-toggle-icon:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
+.theme-toggle-icon svg {
+    transition: transform 0.3s ease;
+}
+
+.theme-toggle-icon:hover svg {
+    transform: rotate(15deg);
+}
+
+.profile-name {
+    color: var(--text-primary);
+    font-family: 'Inter', sans-serif;
+    font-weight: 500;
+    transition: color 0.3s ease;
+}
+
+.profile-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+}
+
+.profile-avatar:hover {
+    transform: scale(1.05);
+}
+
+@media (max-width: 768px) {
+    .navbar {
+        padding: 0 1rem;
+    }
+
+    .navbar-brand h2 {
+        font-size: 1.2rem;
+    }
+
+    .navbar-menu {
+        display: none;
+    }
+
+    .navbar-profile {
+        gap: 0.5rem;
+    }
+
+    .profile-name {
+        display: none;
+    }
+
+    .theme-toggle-icon {
+        width: 36px;
+        height: 36px;
+    }
+    
+    .theme-toggle-icon svg {
+        width: 18px;
+        height: 18px;
+    }
+}
