@@ -14,11 +14,7 @@ const BusinessSetup = () => {
 
   const platforms = [
     { id: 'google', name: 'Google Business', icon: '🔍', color: '#4285F4' },
-    { id: 'yelp', name: 'Yelp', icon: '⭐', color: '#D32323' },
-    { id: 'facebook', name: 'Facebook', icon: '👤', color: '#1877F2' },
-    { id: 'tripadvisor', name: 'TripAdvisor', icon: '🦉', color: '#00AF87' },
-    { id: 'trustpilot', name: 'Trustpilot', icon: '⭐', color: '#00B67A' },
-    { id: 'amazon', name: 'Amazon', icon: '📦', color: '#FF9900' },
+    
   ];
 
   const handleInputChange = (e) => {

@@ -1,0 +1,1145 @@
+{
+	"info": {
+		"_postman_id": "google-business-integration-2026",
+		"name": "Google Business Profile - Review Management",
+		"description": "Complete API collection for Google Business Profile integration including OAuth, review syncing, AI-powered replies, and posting to Google Maps.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "12345"
+	},
+	"item": [
+		{
+			"name": "Authentication",
+			"item": [
+				{
+					"name": "Register User",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"testuser@example.com\",\n  \"password\": \"Test123!@#\",\n  \"firstName\": \"John\",\n  \"lastName\": \"Doe\",\n  \"businessName\": \"Paradise Biryani\",\n  \"role\": \"CLIENT_OWNER\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/auth/register",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"register"
+							]
+						},
+						"description": "Register a new user account. Returns JWT token."
+					},
+					"response": [
+						{
+							"name": "Success - User Registered",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"email\": \"testuser@example.com\",\n  \"password\": \"Test123!@#\",\n  \"firstName\": \"John\",\n  \"lastName\": \"Doe\",\n  \"businessName\": \"Paradise Biryani\",\n  \"role\": \"CLIENT_OWNER\"\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{baseUrl}}/api/auth/register",
+									"host": ["{{baseUrl}}"],
+									"path": ["api", "auth", "register"]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								}
+							],
+							"cookie": [],
+							"body": "{\n  \"success\": true,\n  \"message\": \"User registered successfully\",\n  \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI2NWExYjJjM2Q0ZTVmNjc4OTAxMjM0NSIsInRlbmFudCI6IjY1YTFiMmMzZDRlNWY2Nzg5MDEyMzQ2Iiwicm9sZSI6IkNMSUVOVF9PV05FUiIsImlhdCI6MTcwNTIzMDAwMCwiZXhwIjoxNzA1MzE2NDAwfQ.example_signature\",\n  \"user\": {\n    \"_id\": \"65a1b2c3d4e5f6789012345\",\n    \"email\": \"testuser@example.com\",\n    \"firstName\": \"John\",\n    \"lastName\": \"Doe\",\n    \"role\": \"CLIENT_OWNER\",\n    \"tenant\": \"65a1b2c3d4e5f6789012346\"\n  }\n}"
+						}
+					]
+				},
+				{
+					"name": "Login",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"// Save token to environment variable",
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    if (response.token) {",
+									"        pm.environment.set('authToken', response.token);",
+									"        console.log('✓ Token saved:', response.token.substring(0, 20) + '...');",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"testuser@example.com\",\n  \"password\": \"Test123!@#\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/auth/login",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"login"
+							]
+						},
+						"description": "Login with email and password. Returns JWT token which is automatically saved to environment variable."
+					},
+					"response": [
+						{
+							"name": "Success - Login",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"email\": \"testuser@example.com\",\n  \"password\": \"Test123!@#\"\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{baseUrl}}/api/auth/login",
+									"host": ["{{baseUrl}}"],
+									"path": ["api", "auth", "login"]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								}
+							],
+							"cookie": [],
+							"body": "{\n  \"success\": true,\n  \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI2NWExYjJjM2Q0ZTVmNjc4OTAxMjM0NSIsInRlbmFudCI6IjY1YTFiMmMzZDRlNWY2Nzg5MDEyMzQ2Iiwicm9sZSI6IkNMSUVOVF9PV05FUiIsImlhdCI6MTcwNTIzMDAwMCwiZXhwIjoxNzA1MzE2NDAwfQ.example_signature\",\n  \"user\": {\n    \"_id\": \"65a1b2c3d4e5f6789012345\",\n    \"email\": \"testuser@example.com\",\n    \"firstName\": \"John\",\n    \"lastName\": \"Doe\",\n    \"role\": \"CLIENT_OWNER\",\n    \"tenant\": \"65a1b2c3d4e5f6789012346\"\n  }\n}"
+						}
+					]
+				}
+			],
+			"description": "User authentication endpoints - register and login"
+		},
+		{
+			"name": "Google OAuth & Connection",
+			"item": [
+				{
+					"name": "1. Initiate OAuth Flow",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/google-oauth/connect",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"google-oauth",
+								"connect"
+							]
+						},
+						"description": "Initiates Google OAuth flow. Returns authorization URL.\n\n**Important:** Redirect user to the returned `authUrl` to authorize Google Business Profile access.\n\n**Response:**\n```json\n{\n  \"success\": true,\n  \"authUrl\": \"https://accounts.google.com/o/oauth2/v2/auth?...\",\n  \"message\": \"Redirect user to this URL...\"\n}\n```\n\n**Next Step:** After user authorizes on Google, they will be redirected to the callback URL automatically."
+					},
+					"response": [
+						{
+							"name": "Success Example",
+							"originalRequest": {
+								"method": "GET",
+								"header": [{"key": "Authorization", "value": "Bearer {{authToken}}"}]
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [{"key": "Content-Type", "value": "application/json"}],
+							"cookie": [],
+							"body": "{\n  \"success\": true,\n  \"authUrl\": \"https://accounts.google.com/o/oauth2/v2/auth?client_id=YOUR_CLIENT_ID&redirect_uri=http%3A%2F%2Flocalhost%3A4000%2Fapi%2Fgoogle-oauth%2Fcallback&response_type=code&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fbusiness.manage&access_type=offline&prompt=consent&state=state_token_12345\",\n  \"message\": \"Redirect user to this URL to authorize Google Business access\"\n}"
+						}
+					]
+				},
+				{
+					"name": "2. Check Connection Status",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/google-oauth/status",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"google-oauth",
+								"status"
+							]
+						},
+						"description": "Check if Google Business Profile is connected.\n\n**Response:**\n```json\n{\n  \"success\": true,\n  \"isConnected\": true,\n  \"accountId\": \"123456789\",\n  \"tokenExpiry\": \"2024-01-15T10:30:00.000Z\",\n  \"isTokenExpired\": false,\n  \"locationsCount\": 3\n}\n```"
+					},
+					"response": [
+						{
+							"name": "Connected Example",
+							"originalRequest": {
+								"method": "GET",
+								"header": [{"key": "Authorization", "value": "Bearer {{authToken}}"}]
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [{"key": "Content-Type", "value": "application/json"}],
+							"cookie": [],
+							"body": "{\n  \"success\": true,\n  \"isConnected\": true,\n  \"accountId\": \"123456789012\",\n  \"tokenExpiry\": \"2024-02-15T10:30:00.000Z\",\n  \"isTokenExpired\": false,\n  \"locationsCount\": 3\n}"
+						}
+					]
+				},
+				{
+					"name": "3. Get Business Locations",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"// Save first location ID for testing",
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    if (response.data && response.data.length > 0) {",
+									"        pm.environment.set('locationId', response.data[0]._id);",
+									"        console.log('✓ Location ID saved:', response.data[0]._id);",
+									"        console.log('  Location:', response.data[0].name);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/google-oauth/locations",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"google-oauth",
+								"locations"
+							]
+						},
+						"description": "Get all business locations for the authenticated user.\n\n**Response:**\n```json\n{\n  \"success\": true,\n  \"data\": [\n    {\n      \"_id\": \"65a1b2c3...\",\n      \"name\": \"Paradise Biryani - Main St\",\n      \"slug\": \"paradise-biryani-main\",\n      \"address\": \"123 Main St, City\",\n      \"googleLocationId\": \"ChIJ...\",\n      \"createdAt\": \"2024-01-14T...\"\n    }\n  ],\n  \"count\": 1\n}\n```"
+					},
+					"response": [
+						{
+							"name": "Success Example",
+							"originalRequest": {
+								"method": "GET",
+								"header": [{"key": "Authorization", "value": "Bearer {{authToken}}"}]
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [{"key": "Content-Type", "value": "application/json"}],
+							"cookie": [],
+							"body": "{\n  \"success\": true,\n  \"data\": [\n    {\n      \"_id\": \"65a1b2c3d4e5f6789012347\",\n      \"name\": \"Paradise Biryani - Main Street\",\n      \"slug\": \"paradise-biryani-main-street\",\n      \"address\": \"123 Main St, Downtown, City 12345\",\n      \"googleLocationId\": \"ChIJN1t_tDeuEmsRUsoyG83frY4\",\n      \"createdAt\": \"2024-01-10T08:00:00.000Z\"\n    },\n    {\n      \"_id\": \"65a1b2c3d4e5f6789012348\",\n      \"name\": \"Paradise Biryani - Airport Road\",\n      \"slug\": \"paradise-biryani-airport\",\n      \"address\": \"456 Airport Rd, Terminal Area, City 12346\",\n      \"googleLocationId\": \"ChIJrTLr-GyuEmsRBfy61i59si0\",\n      \"createdAt\": \"2024-01-10T08:00:00.000Z\"\n    },\n    {\n      \"_id\": \"65a1b2c3d4e5f6789012349\",\n      \"name\": \"Paradise Biryani - Mall Location\",\n      \"slug\": \"paradise-biryani-mall\",\n      \"address\": \"789 Shopping Center, Food Court, City 12347\",\n      \"googleLocationId\": \"ChIJwxJK1tauEmsRrgvM3i59si1\",\n      \"createdAt\": \"2024-01-10T08:00:00.000Z\"\n    }\n  ],\n  \"count\": 3\n}"
+						}
+					]
+				},
+				{
+					"name": "4. Sync Reviews from Google",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": ""
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/google-oauth/sync-reviews",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"google-oauth",
+								"sync-reviews"
+							]
+						},
+						"description": "Fetch and sync reviews from Google Business Profile for all locations.\n\n**Response:**\n```json\n{\n  \"success\": true,\n  \"message\": \"Reviews synced successfully\",\n  \"data\": {\n    \"totalNewReviews\": 15,\n    \"totalUpdatedReviews\": 5,\n    \"locationsProcessed\": 3,\n    \"locationResults\": [\n      {\n        \"locationId\": \"65a1b2c3...\",\n        \"locationName\": \"Paradise Biryani - Main St\",\n        \"totalFetched\": 20,\n        \"newReviews\": 15,\n        \"updatedReviews\": 5\n      }\n    ]\n  }\n}\n```\n\n**Note:** This may take a few seconds depending on the number of locations and reviews."
+					},
+					"response": [
+						{
+							"name": "Success Example",
+							"originalRequest": {
+								"method": "POST",
+								"header": [{"key": "Authorization", "value": "Bearer {{authToken}}"}]
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [{"key": "Content-Type", "value": "application/json"}],
+							"cookie": [],
+							"body": "{\n  \"success\": true,\n  \"message\": \"Reviews synced successfully\",\n  \"data\": {\n    \"totalNewReviews\": 25,\n    \"totalUpdatedReviews\": 8,\n    \"locationsProcessed\": 3,\n    \"locationResults\": [\n      {\n        \"locationId\": \"65a1b2c3d4e5f6789012347\",\n        \"locationName\": \"Paradise Biryani - Main Street\",\n        \"totalFetched\": 15,\n        \"newReviews\": 12,\n        \"updatedReviews\": 3\n      },\n      {\n        \"locationId\": \"65a1b2c3d4e5f6789012348\",\n        \"locationName\": \"Paradise Biryani - Airport Road\",\n        \"totalFetched\": 10,\n        \"newReviews\": 8,\n        \"updatedReviews\": 2\n      },\n      {\n        \"locationId\": \"65a1b2c3d4e5f6789012349\",\n        \"locationName\": \"Paradise Biryani - Mall Location\",\n        \"totalFetched\": 8,\n        \"newReviews\": 5,\n        \"updatedReviews\": 3\n      }\n    ]\n  }\n}"
+						}
+					]
+				},
+				{
+					"name": "5. Disconnect Google Account",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": ""
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/google-oauth/disconnect",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"google-oauth",
+								"disconnect"
+							]
+						},
+						"description": "Disconnect Google Business Profile from the account. This removes OAuth tokens.\n\n**Response:**\n```json\n{\n  \"success\": true,\n  \"message\": \"Google Business account disconnected successfully\"\n}\n```"
+					},
+					"response": []
+				}
+			],
+			"description": "Google OAuth connection and location management endpoints"
+		},
+		{
+			"name": "Review Management",
+			"item": [
+				{
+					"name": "Get All Reviews",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"// Save first review ID for testing",
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    if (response.data.reviews && response.data.reviews.length > 0) {",
+									"        pm.environment.set('reviewId', response.data.reviews[0]._id);",
+									"        console.log('✓ Review ID saved:', response.data.reviews[0]._id);",
+									"        console.log('  Reviewer:', response.data.reviews[0].reviewer_name);",
+									"        console.log('  Rating:', response.data.reviews[0].rating);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/reviews?page=1&limit=20",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"reviews"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "1",
+									"description": "Page number"
+								},
+								{
+									"key": "limit",
+									"value": "20",
+									"description": "Items per page"
+								},
+								{
+									"key": "rating",
+									"value": "5",
+									"description": "Filter by rating (1-5)",
+									"disabled": true
+								},
+								{
+									"key": "replied",
+									"value": "false",
+									"description": "Filter by reply status (true/false)",
+									"disabled": true
+								}
+							]
+						},
+						"description": "Get all reviews with optional filters.\n\n**Query Parameters:**\n- `page` - Page number (default: 1)\n- `limit` - Items per page (default: 20)\n- `rating` - Filter by rating 1-5\n- `replied` - Filter by reply status (true/false)\n\n**Response:**\n```json\n{\n  \"success\": true,\n  \"data\": {\n    \"reviews\": [\n      {\n        \"_id\": \"65a1b2c3...\",\n        \"reviewer_name\": \"John Doe\",\n        \"rating\": 5,\n        \"review_text\": \"Amazing biryani!\",\n        \"review_created_at\": \"2024-01-10T10:30:00.000Z\",\n        \"has_reply\": false,\n        \"approval_status\": \"pending\",\n        \"location\": {\n          \"name\": \"Paradise Biryani\",\n          \"slug\": \"paradise-biryani-main\"\n        }\n      }\n    ],\n    \"pagination\": {\n      \"total\": 50,\n      \"page\": 1,\n      \"limit\": 20,\n      \"pages\": 3\n    }\n  }\n}\n```"
+					},
+					"response": [
+						{
+							"name": "Success Example",
+							"originalRequest": {
+								"method": "GET",
+								"header": [{"key": "Authorization", "value": "Bearer {{authToken}}"}],
+								"url": {
+									"raw": "{{baseUrl}}/api/reviews?page=1&limit=20",
+									"host": ["{{baseUrl}}"],
+									"path": ["api", "reviews"],
+									"query": [{"key": "page", "value": "1"}, {"key": "limit", "value": "20"}]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [{"key": "Content-Type", "value": "application/json"}],
+							"cookie": [],
+							"body": "{\n  \"success\": true,\n  \"data\": {\n    \"reviews\": [\n      {\n        \"_id\": \"65a1b2c3d4e5f678901234a\",\n        \"reviewer_name\": \"Rajesh Kumar\",\n        \"rating\": 5,\n        \"review_text\": \"Amazing biryani! The best I've had in years. The rice was perfectly cooked and the spices were just right. The chicken was tender and flavorful. Will definitely come back again!\",\n        \"review_created_at\": \"2024-01-12T14:30:00.000Z\",\n        \"has_reply\": false,\n        \"approval_status\": \"pending\",\n        \"posted_to_google\": false,\n        \"location\": {\n          \"_id\": \"65a1b2c3d4e5f6789012347\",\n          \"name\": \"Paradise Biryani - Main Street\",\n          \"slug\": \"paradise-biryani-main-street\"\n        },\n        \"tenant\": {\n          \"_id\": \"65a1b2c3d4e5f6789012346\",\n          \"businessName\": \"Paradise Biryani\",\n          \"slug\": \"paradise-biryani\"\n        }\n      },\n      {\n        \"_id\": \"65a1b2c3d4e5f678901234b\",\n        \"reviewer_name\": \"Priya Sharma\",\n        \"rating\": 5,\n        \"review_text\": \"Absolutely delicious! The mutton biryani was outstanding. Great ambiance and friendly staff. Highly recommend to everyone!\",\n        \"review_created_at\": \"2024-01-11T18:45:00.000Z\",\n        \"has_reply\": false,\n        \"approval_status\": \"pending\",\n        \"posted_to_google\": false,\n        \"location\": {\n          \"_id\": \"65a1b2c3d4e5f6789012347\",\n          \"name\": \"Paradise Biryani - Main Street\",\n          \"slug\": \"paradise-biryani-main-street\"\n        }\n      },\n      {\n        \"_id\": \"65a1b2c3d4e5f678901234c\",\n        \"reviewer_name\": \"Mohammed Ali\",\n        \"rating\": 4,\n        \"review_text\": \"Very good biryani. The quantity is generous and the taste is authentic. Only suggestion would be to make it slightly less spicy for those who can't handle too much heat.\",\n        \"review_created_at\": \"2024-01-10T12:20:00.000Z\",\n        \"has_reply\": false,\n        \"approval_status\": \"pending\",\n        \"posted_to_google\": false,\n        \"location\": {\n          \"_id\": \"65a1b2c3d4e5f6789012348\",\n          \"name\": \"Paradise Biryani - Airport Road\",\n          \"slug\": \"paradise-biryani-airport\"\n        }\n      },\n      {\n        \"_id\": \"65a1b2c3d4e5f678901234d\",\n        \"reviewer_name\": \"Sarah Johnson\",\n        \"rating\": 5,\n        \"review_text\": \"I'm not even from this city but I made sure to visit Paradise Biryani based on recommendations. Worth every penny! The flavors are incredible.\",\n        \"review_created_at\": \"2024-01-09T16:10:00.000Z\",\n        \"has_reply\": true,\n        \"approval_status\": \"posted\",\n        \"posted_to_google\": true,\n        \"ai_generated_reply\": \"Thank you for your wonderful feedback!\",\n        \"final_reply\": \"Thank you so much for visiting us! We're thrilled you enjoyed the biryani. Hope to see you again soon! - Team Paradise\",\n        \"posted_at\": \"2024-01-10T09:00:00.000Z\",\n        \"location\": {\n          \"_id\": \"65a1b2c3d4e5f6789012347\",\n          \"name\": \"Paradise Biryani - Main Street\",\n          \"slug\": \"paradise-biryani-main-street\"\n        }\n      },\n      {\n        \"_id\": \"65a1b2c3d4e5f678901234e\",\n        \"reviewer_name\": \"Amit Patel\",\n        \"rating\": 2,\n        \"review_text\": \"The biryani was cold when it arrived. Service was also slow. Expected better quality for the price.\",\n        \"review_created_at\": \"2024-01-08T19:30:00.000Z\",\n        \"has_reply\": false,\n        \"approval_status\": \"pending\",\n        \"posted_to_google\": false,\n        \"location\": {\n          \"_id\": \"65a1b2c3d4e5f6789012349\",\n          \"name\": \"Paradise Biryani - Mall Location\",\n          \"slug\": \"paradise-biryani-mall\"\n        }\n      }\n    ],\n    \"pagination\": {\n      \"total\": 33,\n      \"page\": 1,\n      \"limit\": 20,\n      \"pages\": 2\n    }\n  }\n}"
+						}
+					]
+				},
+				{
+					"name": "Get Reviews - 5 Star, No Reply",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/reviews?rating=5&replied=false&limit=10",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"reviews"
+							],
+							"query": [
+								{
+									"key": "rating",
+									"value": "5"
+								},
+								{
+									"key": "replied",
+									"value": "false"
+								},
+								{
+									"key": "limit",
+									"value": "10"
+								}
+							]
+						},
+						"description": "Example: Get 5-star reviews that don't have replies yet."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Reviews - 1 Star (Need Attention)",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/reviews?rating=1&replied=false",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"reviews"
+							],
+							"query": [
+								{
+									"key": "rating",
+									"value": "1"
+								},
+								{
+									"key": "replied",
+									"value": "false"
+								}
+							]
+						},
+						"description": "Example: Get 1-star reviews that need urgent attention."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Single Review",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/reviews/{{reviewId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"reviews",
+								"{{reviewId}}"
+							]
+						},
+						"description": "Get detailed information about a single review.\n\n**Response:**\n```json\n{\n  \"success\": true,\n  \"data\": {\n    \"_id\": \"65a1b2c3...\",\n    \"reviewer_name\": \"John Doe\",\n    \"rating\": 5,\n    \"review_text\": \"Amazing biryani! Best in town!\",\n    \"review_created_at\": \"2024-01-10T10:30:00.000Z\",\n    \"has_reply\": false,\n    \"ai_generated_reply\": null,\n    \"final_reply\": null,\n    \"approval_status\": \"pending\",\n    \"posted_to_google\": false,\n    \"location\": {\n      \"name\": \"Paradise Biryani\",\n      \"slug\": \"paradise-biryani-main\"\n    },\n    \"tenant\": {\n      \"businessName\": \"Paradise Biryani\",\n      \"slug\": \"paradise-biryani\"\n    }\n  }\n}\n```"
+					},
+					"response": [
+						{
+							"name": "Single Review Example",
+							"originalRequest": {
+								"method": "GET",
+								"header": [{"key": "Authorization", "value": "Bearer {{authToken}}"}],
+								"url": {
+									"raw": "{{baseUrl}}/api/reviews/65a1b2c3d4e5f678901234a",
+									"host": ["{{baseUrl}}"],
+									"path": ["api", "reviews", "65a1b2c3d4e5f678901234a"]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [{"key": "Content-Type", "value": "application/json"}],
+							"cookie": [],
+							"body": "{\n  \"success\": true,\n  \"data\": {\n    \"_id\": \"65a1b2c3d4e5f678901234a\",\n    \"google_review_id\": \"ChIJN1t_tDeuEmsRUsoyG83frY4_review_1\",\n    \"reviewer_name\": \"Rajesh Kumar\",\n    \"rating\": 5,\n    \"review_text\": \"Amazing biryani! The best I've had in years. The rice was perfectly cooked and the spices were just right. The chicken was tender and flavorful. Will definitely come back again!\",\n    \"review_created_at\": \"2024-01-12T14:30:00.000Z\",\n    \"has_reply\": false,\n    \"ai_generated_reply\": null,\n    \"final_reply\": null,\n    \"approval_status\": \"pending\",\n    \"posted_to_google\": false,\n    \"posted_at\": null,\n    \"google_reply_id\": null,\n    \"location\": {\n      \"_id\": \"65a1b2c3d4e5f6789012347\",\n      \"name\": \"Paradise Biryani - Main Street\",\n      \"slug\": \"paradise-biryani-main-street\",\n      \"address\": \"123 Main St, Downtown, City 12345\"\n    },\n    \"tenant\": {\n      \"_id\": \"65a1b2c3d4e5f6789012346\",\n      \"businessName\": \"Paradise Biryani\",\n      \"slug\": \"paradise-biryani\"\n    },\n    \"createdAt\": \"2024-01-12T14:31:00.000Z\",\n    \"updatedAt\": \"2024-01-12T14:31:00.000Z\"\n  }\n}"
+						}
+					]
+				}
+			],
+			"description": "View and filter customer reviews"
+		},
+		{
+			"name": "AI Reply Generation & Posting",
+			"item": [
+				{
+					"name": "1. Generate AI Reply",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": ""
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/reviews/{{reviewId}}/generate-reply",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"reviews",
+								"{{reviewId}}",
+								"generate-reply"
+							]
+						},
+						"description": "Generate an AI-powered reply for a review using OpenAI.\n\n**Response:**\n```json\n{\n  \"success\": true,\n  \"message\": \"AI reply generated successfully\",\n  \"data\": {\n    \"reviewId\": \"65a1b2c3...\",\n    \"aiReply\": \"Thank you for your wonderful feedback about our biryani! We're delighted to hear you enjoyed your experience with us. We look forward to serving you again soon!\",\n    \"generatedAt\": \"2024-01-14T10:30:00.000Z\"\n  }\n}\n```\n\n**Note:** The AI reply is saved to the review but NOT posted to Google yet. You can edit it before posting."
+					},
+					"response": [
+						{
+							"name": "AI Reply Generated",
+							"originalRequest": {
+								"method": "POST",
+								"header": [{"key": "Authorization", "value": "Bearer {{authToken}}"}],
+								"url": {
+									"raw": "{{baseUrl}}/api/reviews/65a1b2c3d4e5f678901234a/generate-reply",
+									"host": ["{{baseUrl}}"],
+									"path": ["api", "reviews", "65a1b2c3d4e5f678901234a", "generate-reply"]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [{"key": "Content-Type", "value": "application/json"}],
+							"cookie": [],
+							"body": "{\n  \"success\": true,\n  \"message\": \"AI reply generated successfully\",\n  \"data\": {\n    \"reviewId\": \"65a1b2c3d4e5f678901234a\",\n    \"aiReply\": \"Thank you so much for your wonderful feedback, Rajesh! We're absolutely thrilled to hear that you enjoyed our biryani. Our chefs take great pride in preparing each dish with authentic spices and ensuring the perfect texture. We're delighted that the chicken was tender and flavorful. We look forward to serving you again soon at Paradise Biryani!\",\n    \"generatedAt\": \"2024-01-14T10:30:00.000Z\"\n  }\n}"
+						}
+					]
+				},
+				{
+					"name": "2. Edit Reply (Optional)",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"editedReply\": \"Thank you so much for your wonderful feedback! We're thrilled you loved our signature biryani. Hope to see you again soon! 🙏\\n\\n- Ahmed, Owner\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/reviews/{{reviewId}}/reply",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"reviews",
+								"{{reviewId}}",
+								"reply"
+							]
+						},
+						"description": "Edit the AI-generated reply before posting to Google.\n\n**Request Body:**\n```json\n{\n  \"editedReply\": \"Your customized reply text\"\n}\n```\n\n**Response:**\n```json\n{\n  \"success\": true,\n  \"message\": \"Reply updated successfully\",\n  \"data\": {\n    \"reviewId\": \"65a1b2c3...\",\n    \"finalReply\": \"Your customized reply text\"\n  }\n}\n```\n\n**Note:** This step is optional. You can skip it and post the AI-generated reply directly."
+					},
+					"response": [
+						{
+							"name": "Reply Edited",
+							"originalRequest": {
+								"method": "PUT",
+								"header": [{"key": "Authorization", "value": "Bearer {{authToken}}"}],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"editedReply\": \"Thank you so much, Rajesh! We're thrilled you loved our biryani. Hope to see you again soon! 🙏\\n\\n- Ahmed, Owner\\nParadise Biryani\"\n}",
+									"options": {"raw": {"language": "json"}}
+								},
+								"url": {
+									"raw": "{{baseUrl}}/api/reviews/65a1b2c3d4e5f678901234a/reply",
+									"host": ["{{baseUrl}}"],
+									"path": ["api", "reviews", "65a1b2c3d4e5f678901234a", "reply"]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [{"key": "Content-Type", "value": "application/json"}],
+							"cookie": [],
+							"body": "{\n  \"success\": true,\n  \"message\": \"Reply updated successfully\",\n  \"data\": {\n    \"reviewId\": \"65a1b2c3d4e5f678901234a\",\n    \"finalReply\": \"Thank you so much, Rajesh! We're thrilled you loved our biryani. Hope to see you again soon! 🙏\\n\\n- Ahmed, Owner\\nParadise Biryani\"\n  }\n}"
+						}
+					]
+				},
+				{
+					"name": "3. Approve & Post Reply to Google",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"editedReply\": \"Optional - final version if you want to edit one last time\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/reviews/{{reviewId}}/approve-reply",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"reviews",
+								"{{reviewId}}",
+								"approve-reply"
+							]
+						},
+						"description": "Approve and post the reply to Google Business Profile.\n\n**Request Body (Optional):**\n```json\n{\n  \"editedReply\": \"Final edited version (optional)\"\n}\n```\n\n**Response:**\n```json\n{\n  \"success\": true,\n  \"message\": \"Reply approved and posted to Google successfully\",\n  \"data\": {\n    \"reviewId\": \"65a1b2c3...\",\n    \"finalReply\": \"Thank you so much for your wonderful feedback!...\",\n    \"approvedAt\": \"2024-01-14T10:30:00.000Z\",\n    \"postedAt\": \"2024-01-14T10:30:05.000Z\"\n  }\n}\n```\n\n**Important:** Once posted, the reply will be visible on Google Maps within a few minutes and cannot be edited through the API."
+					},
+					"response": [
+						{
+							"name": "Reply Posted to Google",
+							"originalRequest": {
+								"method": "POST",
+								"header": [{"key": "Authorization", "value": "Bearer {{authToken}}"}],
+								"url": {
+									"raw": "{{baseUrl}}/api/reviews/65a1b2c3d4e5f678901234a/approve-reply",
+									"host": ["{{baseUrl}}"],
+									"path": ["api", "reviews", "65a1b2c3d4e5f678901234a", "approve-reply"]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [{"key": "Content-Type", "value": "application/json"}],
+							"cookie": [],
+							"body": "{\n  \"success\": true,\n  \"message\": \"Reply approved and posted to Google successfully\",\n  \"data\": {\n    \"reviewId\": \"65a1b2c3d4e5f678901234a\",\n    \"finalReply\": \"Thank you so much, Rajesh! We're thrilled you loved our biryani. Hope to see you again soon! 🙏\\n\\n- Ahmed, Owner\\nParadise Biryani\",\n    \"approvedAt\": \"2024-01-14T10:35:00.000Z\",\n    \"postedAt\": \"2024-01-14T10:35:05.000Z\",\n    \"googleReplyId\": \"ChIJN1t_tDeuEmsRUsoyG83frY4_reply_1\"\n  }\n}"
+						}
+					]
+				}
+			],
+			"description": "Generate AI replies and post them to Google Maps"
+		},
+		{
+			"name": "Complete Workflow Example",
+			"item": [
+				{
+					"name": "Step 1: Login",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    pm.environment.set('authToken', response.token);",
+									"    console.log('✓ Step 1 Complete: Logged in');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"testuser@example.com\",\n  \"password\": \"Test123!@#\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/auth/login",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"login"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Step 2: Connect Google (Get URL)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    console.log('✓ Step 2 Complete: OAuth URL generated');",
+									"    console.log('⚠ Manual action required: User must authorize on Google');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/google-oauth/connect",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"google-oauth",
+								"connect"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Step 3: Get Locations",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    if (response.data.length > 0) {",
+									"        pm.environment.set('locationId', response.data[0]._id);",
+									"    }",
+									"    console.log('✓ Step 3 Complete: Locations retrieved');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/google-oauth/locations",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"google-oauth",
+								"locations"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Step 4: Sync Reviews",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    console.log('✓ Step 4 Complete: Reviews synced from Google');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/google-oauth/sync-reviews",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"google-oauth",
+								"sync-reviews"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Step 5: Get Reviews (5-star, no reply)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    if (response.data.reviews.length > 0) {",
+									"        pm.environment.set('reviewId', response.data.reviews[0]._id);",
+									"    }",
+									"    console.log('✓ Step 5 Complete: Found reviews needing replies');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/reviews?rating=5&replied=false&limit=5",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"reviews"
+							],
+							"query": [
+								{
+									"key": "rating",
+									"value": "5"
+								},
+								{
+									"key": "replied",
+									"value": "false"
+								},
+								{
+									"key": "limit",
+									"value": "5"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Step 6: Generate AI Reply",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    console.log('✓ Step 6 Complete: AI reply generated');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/reviews/{{reviewId}}/generate-reply",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"reviews",
+								"{{reviewId}}",
+								"generate-reply"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Step 7: Edit Reply (Optional)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    console.log('✓ Step 7 Complete: Reply edited');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"editedReply\": \"Thank you so much! We're delighted you enjoyed your experience. Hope to see you again soon! 🙏\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/reviews/{{reviewId}}/reply",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"reviews",
+								"{{reviewId}}",
+								"reply"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Step 8: Post to Google",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    console.log('✓ Step 8 Complete: Reply posted to Google Maps!');",
+									"    console.log('🎉 Workflow complete!');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/reviews/{{reviewId}}/approve-reply",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"reviews",
+								"{{reviewId}}",
+								"approve-reply"
+							]
+						}
+					},
+					"response": []
+				}
+			],
+			"description": "Complete workflow from login to posting reply on Google Maps. Run these requests in sequence to test the entire flow."
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:4000",
+			"type": "string"
+		},
+		{
+			"key": "authToken",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "reviewId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "locationId",
+			"value": "",
+			"type": "string"
+		}
+	]
+}

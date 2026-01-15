@@ -16,6 +16,13 @@ export default function Sidebar() {
     const menuItems = [
         { path: '/', icon: dashboardIcon, label: 'Dashboard' },
         { path: '/reviews', icon: reviewIcon, label: 'Reviews' },
+        { path: '/analytics', icon: sentimentMapIcon, label: 'Analytics' },
+        //   { path: '/analytics', icon: sentimentMapIcon, label: 'Analytics' },
+            { path: '/settings', icon: '⚙️', label: 'Settings' },
+            { path: '/billing', icon: '💳', label: 'Billing' }
+    ]
+
+    const analyticsSubmenu = [
         { path: '/sentiment-map', icon: sentimentMapIcon, label: 'Sentiment Map' },
         { path: '/word-cloud', icon: wordCloudIcon, label: 'Word Cloud' },
         { path: '/industry-comparison', icon: industryComparisonIcon, label: 'Industry Comparison' },
@@ -36,7 +43,11 @@ export default function Sidebar() {
                         <li key={item.path} className={location.pathname === item.path ? 'active' : ''}>
                             <Link to={item.path}>
                                 <span className="icon">
-                                    <img src={item.icon} alt={item.label} />
+                                    {typeof item.icon === 'string' && item.icon.length < 3 ? (
+                                        item.icon
+                                    ) : (
+                                        <img src={item.icon} alt={item.label} />
+                                    )}
                                 </span>
                                 <span className="label">{item.label}</span>
                             </Link>
@@ -44,12 +55,6 @@ export default function Sidebar() {
                     ))}
                 </ul>
             </nav>
-            <div className="sidebar-footer">
-                <Link to="/settings" className="settings-link">
-                    <span className="icon">⚙️</span>
-                    <span className="label">Settings</span>
-                </Link>
-            </div>
         </aside>
     )
 }

@@ -1,0 +1,13 @@
+# Defaults
+node_modules
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# Logs
+logs
+*.log
+
+# Sensitive Files
+ADMIN_CREDENTIALS.md
