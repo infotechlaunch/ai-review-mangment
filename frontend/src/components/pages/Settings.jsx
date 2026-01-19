@@ -1,7 +1,10 @@
 import React, { useState } from 'react'
+import { useGoogleConnection } from '../../hooks/useGoogleConnection'
+import ConnectionStatusBanner from '../common/ConnectionStatusBanner'
 
 export default function Settings() {
-    const [activeTab, setActiveTab] = useState('reply-settings')
+    const [activeTab, setActiveTab] = useState('connections')
+    const { isConnected, checkConnection } = useGoogleConnection()
     
     // State for Auto-Approval Settings
     const [autoApproval, setAutoApproval] = useState({
@@ -34,10 +37,64 @@ export default function Settings() {
     })
 
     const tabs = [
+        { id: 'connections', label: 'Connections', icon: '🔗' },
         { id: 'reply-settings', label: 'Reply Settings', icon: '💬' },
         { id: 'automation', label: 'Automation', icon: '🤖' },
         { id: 'notifications', label: 'Notifications', icon: '🔔' }
     ]
+
+    const handleConnectGoogle = async () => {
+        try {
+            const token = localStorage.getItem('token');
+            const response = await fetch('http://localhost:4000/api/google-oauth/connect', {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+
+            const data = await response.json();
+
+            if (data.success && data.authUrl) {
+                window.location.href = data.authUrl;
+            } else {
+                alert('Failed to initiate Google connection. Please try again.');
+            }
+        } catch (error) {
+            console.error('Google connect error:', error);
+            alert('Failed to connect to Google. Please try again.');
+        }
+    };
+
+    const handleDisconnectGoogle = async () => {
+        if (!confirm('Are you sure you want to disconnect your Google Business Profile? You will lose access to review data.')) {
+            return;
+        }
+
+        try {
+            const token = localStorage.getItem('token');
+            const response = await fetch('http://localhost:4000/api/google-oauth/disconnect', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                alert('Google Business Profile disconnected successfully');
+                checkConnection();
+            } else {
+                alert('Failed to disconnect. Please try again.');
+            }
+        } catch (error) {
+            console.error('Disconnect error:', error);
+            alert('Failed to disconnect. Please try again.');
+        }
+    };
 
     const handleRegenerateReply = () => {
         const newReplies = [
@@ -96,6 +153,105 @@ export default function Settings() {
                         </button>
                     ))}
                 </div>
+
+                {/* Connections Tab */}
+                {activeTab === 'connections' && (
+                    <div className="grid-container">
+                        <div className="grid-col-12">
+                            <div className="widget-card">
+                                <h3 className="widget-title">Platform Connections</h3>
+                                <p style={{ fontSize: '13px', color: 'var(--text-tertiary)', marginBottom: '20px' }}>
+                                    Manage your connected review platforms
+                                </p>
+
+                                <ConnectionStatusBanner />
+
+                                <div style={{
+                                    padding: '20px',
+                                    border: '1px solid var(--border-color)',
+                                    borderRadius: '8px',
+                                    marginBottom: '16px'
+                                }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                                        <div style={{
+                                            width: '48px',
+                                            height: '48px',
+                                            borderRadius: '12px',
+                                            backgroundColor: '#4285F4',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            fontSize: '24px'
+                                        }}>
+                                            🔍
+                                        </div>
+                                        <div style={{ flex: 1 }}>
+                                            <h4 style={{ margin: 0, fontSize: '16px', fontWeight: '600', color: 'var(--text-primary)' }}>
+                                                Google Business Profile
+                                            </h4>
+                                            <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--text-tertiary)' }}>
+                                                {isConnected 
+                                                    ? 'Connected and syncing reviews automatically' 
+                                                    : 'Connect to manage your Google reviews and respond with AI'}
+                                            </p>
+                                        </div>
+                                        {isConnected ? (
+                                            <button
+                                                onClick={handleDisconnectGoogle}
+                                                style={{
+                                                    padding: '10px 20px',
+                                                    backgroundColor: '#ef4444',
+                                                    color: 'white',
+                                                    border: 'none',
+                                                    borderRadius: '6px',
+                                                    fontSize: '14px',
+                                                    fontWeight: '500',
+                                                    cursor: 'pointer'
+                                                }}
+                                            >
+                                                Disconnect
+                                            </button>
+                                        ) : (
+                                            <button
+                                                onClick={handleConnectGoogle}
+                                                style={{
+                                                    padding: '10px 20px',
+                                                    backgroundColor: '#4285F4',
+                                                    color: 'white',
+                                                    border: 'none',
+                                                    borderRadius: '6px',
+                                                    fontSize: '14px',
+                                                    fontWeight: '500',
+                                                    cursor: 'pointer'
+                                                }}
+                                            >
+                                                Connect
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div style={{
+                                    padding: '16px',
+                                    backgroundColor: 'var(--bg-secondary)',
+                                    borderRadius: '8px',
+                                    fontSize: '13px',
+                                    color: 'var(--text-secondary)'
+                                }}>
+                                    <p style={{ margin: 0, fontWeight: '600', marginBottom: '8px' }}>
+                                        💡 About Platform Connections
+                                    </p>
+                                    <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                                        <li>Reviews are synced automatically every hour</li>
+                                        <li>AI-generated responses can be posted directly to Google</li>
+                                        <li>You can disconnect at any time from this page</li>
+                                        <li>Your review data remains in the system after disconnecting</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* Reply Settings Tab */}
                 {activeTab === 'reply-settings' && (

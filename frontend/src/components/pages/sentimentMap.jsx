@@ -1,16 +1,56 @@
-import React from 'react'
+import React, { useState, useEffect } from 'react'
+import { apiRequest } from '../../utils/api'
 
 export default function SentimentMap() {
-  // Mock data for sentiment by category
-  const sentimentByCategory = [
-    { category: 'Service Quality', positive: 78, neutral: 15, negative: 7 },
-    { category: 'Food Quality', positive: 85, neutral: 10, negative: 5 },
-    { category: 'Pricing', positive: 62, neutral: 25, negative: 13 },
-    { category: 'Ambiance', positive: 73, neutral: 20, negative: 7 },
-    { category: 'Staff Friendliness', positive: 88, neutral: 8, negative: 4 },
-    { category: 'Cleanliness', positive: 82, neutral: 12, negative: 6 },
-    { category: 'Wait Time', positive: 55, neutral: 30, negative: 15 }
-  ]
+  const [sentimentByCategory, setSentimentByCategory] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetchSentimentData()
+  }, [])
+
+  const fetchSentimentData = async () => {
+    try {
+      setLoading(true)
+      const result = await apiRequest('/api/client/reviews')
+
+      if (result.success && result.data) {
+        const reviews = result.data.reviews || result.data || []
+        
+        // Calculate sentiment by rating distribution
+        const ratingCategories = [
+          { category: '5 Star Reviews', rating: 5 },
+          { category: '4 Star Reviews', rating: 4 },
+          { category: '3 Star Reviews', rating: 3 },
+          { category: '2 Star Reviews', rating: 2 },
+          { category: '1 Star Reviews', rating: 1 }
+        ]
+
+        const categoryData = ratingCategories.map(cat => {
+          const categoryReviews = reviews.filter(r => parseInt(r.rating) === cat.rating)
+          const total = categoryReviews.length
+          const positive = cat.rating >= 4 ? total : 0
+          const neutral = cat.rating === 3 ? total : 0
+          const negative = cat.rating <= 2 ? total : 0
+          const totalReviews = reviews.length
+
+          return {
+            category: cat.category,
+            positive: totalReviews > 0 ? Math.round((positive / totalReviews) * 100) : 0,
+            neutral: totalReviews > 0 ? Math.round((neutral / totalReviews) * 100) : 0,
+            negative: totalReviews > 0 ? Math.round((negative / totalReviews) * 100) : 0,
+            count: total
+          }
+        }).filter(cat => cat.count > 0)
+
+        setSentimentByCategory(categoryData)
+      }
+      setLoading(false)
+    } catch (err) {
+      console.error('Error fetching sentiment data:', err)
+      setLoading(false)
+    }
+  }
 
   const getOverallSentiment = (positive, negative) => {
     if (positive >= 80) return { color: '#10b981', label: 'Excellent' }

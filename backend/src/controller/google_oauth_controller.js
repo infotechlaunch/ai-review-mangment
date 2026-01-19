@@ -3,6 +3,46 @@ const Tenant = require('../models/Tenant');
 const Location = require('../models/Location');
 const Review = require('../models/Review');
 const { fetchGoogleReviews } = require('../services/googleBusinessService');
+const { accountManagementLimiter, businessInfoLimiter } = require('../utils/rateLimiter');
+
+// Rate limiting and retry configuration
+const RETRY_CONFIG = {
+    maxRetries: 3,
+    initialDelay: 1000, // 1 second
+    maxDelay: 60000, // 60 seconds
+    backoffMultiplier: 2
+};
+
+// Simple in-memory cache for account data
+const accountCache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Sleep utility for delays
+ */
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Retry function with exponential backoff
+ */
+const retryWithBackoff = async (fn, retries = RETRY_CONFIG.maxRetries, delay = RETRY_CONFIG.initialDelay) => {
+    try {
+        return await fn();
+    } catch (error) {
+        // Check if it's a quota error
+        const isQuotaError = error.code === 429 ||
+            error.status === 429 ||
+            (error.message && error.message.includes('Quota exceeded'));
+
+        if (isQuotaError && retries > 0) {
+            console.log(`⏳ Quota exceeded. Retrying in ${delay}ms... (${retries} retries left)`);
+            await sleep(delay);
+            const nextDelay = Math.min(delay * RETRY_CONFIG.backoffMultiplier, RETRY_CONFIG.maxDelay);
+            return retryWithBackoff(fn, retries - 1, nextDelay);
+        }
+        throw error;
+    }
+};
 
 /**
  * Google OAuth Controller
@@ -14,7 +54,7 @@ const getOAuth2Client = () => {
     return new google.auth.OAuth2(
         process.env.GOOGLE_CLIENT_ID,
         process.env.GOOGLE_CLIENT_SECRET,
-        process.env.GOOGLE_REDIRECT_URI || 'http://localhost:4000/auth/google/callback'
+        process.env.GOOGLE_REDIRECT_URI || 'http://localhost:4000/api/google-oauth/callback'
     );
 };
 
@@ -30,12 +70,21 @@ const SCOPES = [
  */
 const initiateOAuthFlow = async (req, res) => {
     try {
-        const tenantId = req.user.tenant || req.user.tenantId;
+        // Support both authenticated and onboarding flow
+        let tenantId;
+
+        if (req.params.tenantId) {
+            // Onboarding flow - tenantId from URL parameter
+            tenantId = req.params.tenantId;
+        } else if (req.user) {
+            // Authenticated flow - tenantId from JWT
+            tenantId = req.user.tenant || req.user.tenantId;
+        }
 
         if (!tenantId) {
             return res.status(400).json({
                 success: false,
-                message: 'Tenant ID is required. Please log in again.'
+                message: 'Tenant ID is required. Please log in again or complete registration.'
             });
         }
 
@@ -124,21 +173,43 @@ const handleOAuthCallback = async (req, res) => {
         // Set credentials to use the access token
         oauth2Client.setCredentials(tokens);
 
-        // Fetch Google Business accounts to get account ID
-        const mybusiness = google.mybusinessaccountmanagement({ version: 'v1', auth: oauth2Client });
-        const accountsResponse = await mybusiness.accounts.list();
+        // Check cache first to avoid unnecessary API calls
+        const cacheKey = `accounts_${tenantId}`;
+        let accountId;
 
-        const accounts = accountsResponse.data.accounts || [];
-        if (accounts.length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: 'No Google Business accounts found for this Google account'
+        const cachedData = accountCache.get(cacheKey);
+        if (cachedData && (Date.now() - cachedData.timestamp) < CACHE_TTL) {
+            console.log('✓ Using cached account data');
+            accountId = cachedData.accountId;
+        } else {
+            // Fetch Google Business accounts with retry logic
+            const mybusiness = google.mybusinessaccountmanagement({ version: 'v1', auth: oauth2Client });
+
+            const accountsResponse = await retryWithBackoff(async () => {
+                return await accountManagementLimiter.execute(async () => {
+                    return await mybusiness.accounts.list();
+                });
             });
-        }
 
-        // Use the first account (or you can let user choose)
-        const accountName = accounts[0].name; // Format: "accounts/123456789"
-        const accountId = accountName.split('/')[1];
+            const accounts = accountsResponse.data.accounts || [];
+            if (accounts.length === 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'No Google Business accounts found for this Google account'
+                });
+            }
+
+            // Use the first account (or you can let user choose)
+            const accountName = accounts[0].name; // Format: "accounts/123456789"
+            accountId = accountName.split('/')[1];
+
+            // Cache the account data
+            accountCache.set(cacheKey, {
+                accountId,
+                timestamp: Date.now()
+            });
+            console.log('✓ Cached account data for future requests');
+        }
 
         // Calculate token expiry
         const tokenExpiry = new Date(Date.now() + (tokens.expiry_date || 3600 * 1000));
@@ -155,7 +226,7 @@ const handleOAuthCallback = async (req, res) => {
 
         console.log(`✓ Google Business account connected for tenant: ${tenant.slug}`);
 
-        // Fetch and save locations
+        // Fetch and save locations with retry logic
         try {
             await fetchAndSaveLocations(tenant, oauth2Client, accountId);
         } catch (locError) {
@@ -163,20 +234,39 @@ const handleOAuthCallback = async (req, res) => {
             // Continue even if location fetch fails
         }
 
-        res.json({
-            success: true,
-            message: 'Google Business account connected successfully',
-            accountId: accountId,
-            accountName: accounts[0].accountName,
-        });
+        // Add delay before syncing reviews to avoid quota issues
+        console.log('⏳ Waiting before syncing reviews to avoid rate limits...');
+        await sleep(2000); // 2 second delay
+
+        // Sync reviews after connection - do this in background to avoid blocking the response
+        // We'll skip this during initial connection to reduce API calls
+        console.log('ℹ️ Skipping initial review sync to avoid quota issues. Reviews will be synced later.');
+
+        // Optional: You can uncomment this to sync reviews, but it may cause quota issues
+        /*
+        try {
+            const locations = await Location.find({ tenant: tenant._id, isActive: true });
+            for (const location of locations) {
+                try {
+                    await sleep(1000); // Delay between each location
+                    await fetchGoogleReviews(accountId, location.googleLocationId, tokens.access_token);
+                } catch (reviewError) {
+                    console.warn(`Warning: Could not fetch reviews for location ${location.name}:`, reviewError.message);
+                }
+            }
+        } catch (syncError) {
+            console.warn('Warning: Could not sync reviews:', syncError.message);
+        }
+        */
+
+        // Redirect to frontend success page
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+        res.redirect(`${frontendUrl}/onboarding/success?connected=true`);
 
     } catch (error) {
         console.error('OAuth callback error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to complete OAuth flow',
-            error: error.message
-        });
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+        res.redirect(`${frontendUrl}/onboarding/success?connected=false&error=${encodeURIComponent(error.message)}`);
     }
 };
 
@@ -190,9 +280,14 @@ const fetchAndSaveLocations = async (tenant, oauth2Client, accountId) => {
     try {
         const mybusiness = google.mybusinessbusinessinformation({ version: 'v1', auth: oauth2Client });
 
-        const locationsResponse = await mybusiness.accounts.locations.list({
-            parent: `accounts/${accountId}`,
-            readMask: 'name,title,storefrontAddress',
+        // Use retry logic and rate limiting for location fetching
+        const locationsResponse = await retryWithBackoff(async () => {
+            return await businessInfoLimiter.execute(async () => {
+                return await mybusiness.accounts.locations.list({
+                    parent: `accounts/${accountId}`,
+                    readMask: 'name,title,storefrontAddress',
+                });
+            });
         });
 
         const locations = locationsResponse.data.locations || [];

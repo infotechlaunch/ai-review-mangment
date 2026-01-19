@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './BusinessSetup.css';
+import { apiRequest } from '../../utils/api';
 
 const BusinessSetup = () => {
   const [currentStep, setCurrentStep] = useState(1);
@@ -9,8 +10,24 @@ const BusinessSetup = () => {
     industry: '',
     website: '',
   });
-  const [selectedPlatforms, setSelectedPlatforms] = useState([]);
+  const [selectedPlatforms, setSelectedPlatforms] = useState(['google']);
+  const [isConnecting, setIsConnecting] = useState(false);
   const navigate = useNavigate();
+
+  // Load existing business data from localStorage on component mount
+  useEffect(() => {
+    const existingBusinessName = localStorage.getItem('businessName');
+    const userEmail = localStorage.getItem('userEmail');
+    
+    if (existingBusinessName) {
+      setBusinessData(prev => ({
+        ...prev,
+        businessName: existingBusinessName
+      }));
+    }
+
+    // Note: No token check - allow onboarding without login
+  }, [navigate]);
 
   const platforms = [
     { id: 'google', name: 'Google Business', icon: '🔍', color: '#4285F4' },
@@ -37,9 +54,27 @@ const BusinessSetup = () => {
     if (currentStep < 3) {
       setCurrentStep(currentStep + 1);
     } else {
+      // Save business data to localStorage
+      if (businessData.businessName) {
+        localStorage.setItem('businessName', businessData.businessName);
+      }
+      if (businessData.industry) {
+        localStorage.setItem('businessIndustry', businessData.industry);
+      }
+      if (businessData.website) {
+        localStorage.setItem('businessWebsite', businessData.website);
+      }
+      
       // Complete onboarding
       console.log('Onboarding complete:', { businessData, selectedPlatforms });
-      navigate('/');
+      
+      // Navigate to dashboard
+      const userRole = localStorage.getItem('userRole');
+      if (userRole === 'ADMIN') {
+        navigate('/admin');
+      } else {
+        navigate('/');
+      }
     }
   };
 
@@ -57,6 +92,43 @@ const BusinessSetup = () => {
       return selectedPlatforms.length > 0;
     }
     return true;
+  };
+
+  const handleGoogleConnect = async () => {
+    try {
+      setIsConnecting(true);
+      
+      // Get tenantId from localStorage (stored during registration)
+      const tenantId = localStorage.getItem('tenantId');
+      
+      if (!tenantId) {
+        alert('Session expired. Please register again.');
+        navigate('/login');
+        return;
+      }
+
+      // Use onboarding endpoint (no authentication required)
+      const response = await fetch(`http://localhost:4000/api/google-oauth/connect-onboarding/${tenantId}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const data = await response.json();
+
+      if (data.success && data.authUrl) {
+        // Redirect to Google OAuth consent screen
+        window.location.href = data.authUrl;
+      } else {
+        alert('Failed to initiate Google connection. Please try again.');
+      }
+    } catch (error) {
+      console.error('Google connect error:', error);
+      alert(error.message || 'Failed to connect to Google. Please try again.');
+    } finally {
+      setIsConnecting(false);
+    }
   };
 
   return (
@@ -93,7 +165,7 @@ const BusinessSetup = () => {
             <div className="step-1">
               <h2>Tell us about your business</h2>
               <p className="step-description">
-                Let's start by setting up your business profile
+                Let's complete your business profile setup
               </p>
 
               <div className="form-group">
@@ -107,6 +179,9 @@ const BusinessSetup = () => {
                   placeholder="Enter your business name"
                   required
                 />
+                <small style={{ color: '#666', fontSize: '12px', marginTop: '4px', display: 'block' }}>
+                  This is the name customers will see on your reviews
+                </small>
               </div>
 
               <div className="form-group">
@@ -128,6 +203,8 @@ const BusinessSetup = () => {
                   <option value="fitness">Fitness & Wellness</option>
                   <option value="professional">Professional Services</option>
                   <option value="real-estate">Real Estate</option>
+                  <option value="education">Education</option>
+                  <option value="entertainment">Entertainment</option>
                   <option value="other">Other</option>
                 </select>
               </div>
@@ -142,6 +219,9 @@ const BusinessSetup = () => {
                   onChange={handleInputChange}
                   placeholder="https://yourbusiness.com"
                 />
+                <small style={{ color: '#666', fontSize: '12px', marginTop: '4px', display: 'block' }}>
+                  Help customers find you online
+                </small>
               </div>
             </div>
           )}
@@ -181,9 +261,9 @@ const BusinessSetup = () => {
 
           {currentStep === 3 && (
             <div className="step-3">
-              <h2>Connect Your Accounts</h2>
+              <h2>Connect Your Google Business Account</h2>
               <p className="step-description">
-                Follow these simple steps to connect your review platforms
+                Connect your Google Business Profile to start managing reviews with AI
               </p>
 
               <div className="connection-guide">
@@ -205,20 +285,26 @@ const BusinessSetup = () => {
                         </div>
                         <div className="connection-step">
                           <span className="step-number">2</span>
-                          <p>Sign in to your {platform.name} account</p>
+                          <p>Sign in with your Google account that manages your business</p>
                         </div>
                         <div className="connection-step">
                           <span className="step-number">3</span>
-                          <p>Grant access permissions to manage reviews</p>
+                          <p>Grant access permissions to manage your business reviews</p>
+                        </div>
+                        <div className="connection-step">
+                          <span className="step-number">4</span>
+                          <p>Select your business location to sync reviews</p>
                         </div>
                       </div>
 
                       <button 
                         className="btn-connect"
                         style={{ borderColor: platform.color, color: platform.color }}
-                        onClick={() => console.log(`Connecting to ${platform.name}`)}
+                        onClick={handleGoogleConnect}
+                        disabled={isConnecting}
                       >
-                        Connect {platform.name}
+                        <span style={{ fontSize: '20px', marginRight: '8px' }}>{platform.icon}</span>
+                        {isConnecting ? 'Connecting...' : `Connect ${platform.name}`}
                       </button>
                     </div>
                   );
@@ -226,7 +312,7 @@ const BusinessSetup = () => {
               </div>
 
               <div className="skip-notice">
-                <p>You can also connect these platforms later from your dashboard settings.</p>
+                <p>💡 You can also skip this step and connect your account later from dashboard settings.</p>
               </div>
             </div>
           )}

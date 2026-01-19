@@ -4,7 +4,7 @@ A Node.js (Express) backend for an AI Review Management system using **Google Sh
 
 ## ✨ **No Google Console Setup Required!**
 
-This backend uses **CSV export** to read data from Google Sheets - just make your sheets public and you're ready to go!
+This backend uses **CSV export** to read data from Google Sheets - just make your ffsheets public and you're ready to go!
 
 ## 🚀 Quick Start (2 Steps!)
 

@@ -5,52 +5,117 @@ import './Login.css';
 const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [businessName, setBusinessName] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setError('');
+    setLoading(true);
 
     try {
-      // Call backend API to verify credentials
-      const response = await fetch('http://localhost:4000/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email, password }),
-      });
+      if (isSignUp) {
+        // Register CLIENT_OWNER
+        if (!firstName || !lastName || !businessName) {
+          setError('Please fill in all required fields');
+          setLoading(false);
+          return;
+        }
 
-      const data = await response.json();
+        const response = await fetch('http://localhost:4000/api/auth/register/client', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email,
+            password,
+            firstName,
+            lastName,
+            businessName,
+          }),
+        });
 
-      if (data.success && data.token) {
-        // Store JWT token and user info in localStorage
-        localStorage.setItem('token', data.token);
-        localStorage.setItem('userRole', data.role);
-        localStorage.setItem('userEmail', data.email || data.slug);
-        localStorage.setItem('userName', data.businessName || data.email);
+        const data = await response.json();
 
-        // Navigate based on user role
-        console.log('Login successful:', data.role);
-        if (data.role === 'ADMIN') {
-          navigate('/admin');
+        if (data.success && data.token) {
+          // Store JWT token and user info in localStorage
+          localStorage.setItem('token', data.token);
+          localStorage.setItem('userRole', data.role);
+          localStorage.setItem('userEmail', data.email);
+          localStorage.setItem('userName', `${data.firstName} ${data.lastName}`);
+          
+          if (data.tenant) {
+            localStorage.setItem('tenantId', data.tenant.id);
+            localStorage.setItem('tenantSlug', data.tenant.slug);
+            localStorage.setItem('businessName', data.tenant.businessName);
+          }
+
+          console.log('Registration successful:', data);
+          
+          // Navigate to business setup for onboarding
+          navigate('/onboarding');
         } else {
-          navigate('/dashboard');
+          setError(data.message || 'Registration failed. Please try again.');
         }
       } else {
-        alert(data.message || 'Login failed. Please check your credentials.');
+        // Login
+        const response = await fetch('http://localhost:4000/api/auth/login', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ email, password }),
+        });
+
+        const data = await response.json();
+
+        if (data.success && data.token) {
+          // Store JWT token and user info in localStorage
+          localStorage.setItem('token', data.token);
+          localStorage.setItem('userRole', data.role);
+          localStorage.setItem('userEmail', data.email);
+          localStorage.setItem('userName', `${data.firstName} ${data.lastName}`);
+          
+          if (data.tenant) {
+            localStorage.setItem('tenantId', data.tenant.id);
+            localStorage.setItem('tenantSlug', data.tenant.slug);
+            localStorage.setItem('businessName', data.tenant.businessName);
+          }
+
+          // Check Google connection status before navigating
+          console.log('Login successful:', data.role);
+          if (data.role === 'ADMIN') {
+            navigate('/admin');
+          } else {
+            // Navigate directly to dashboard
+            navigate('/');
+          }
+        } else {
+          setError(data.message || 'Login failed. Please check your credentials.');
+        }
       }
     } catch (error) {
-      console.error('Login error:', error);
-      alert('Login failed. Please make sure the backend server is running on port 4000.');
+      console.error('Authentication error:', error);
+      setError('Failed to connect to server. Please make sure the backend is running on port 4000.');
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleOAuthLogin = (provider) => {
-    // TODO: Implement OAuth login logic
-    console.log(`Login with ${provider}`);
-    localStorage.setItem('userRole', 'user');
-    navigate('/onboarding');
+    // Redirect to Google OAuth
+    if (provider === 'Google') {
+      window.location.href = 'http://localhost:4000/api/google-oauth/auth';
+    } else {
+      console.log(`${provider} login not yet implemented`);
+      setError(`${provider} login is not yet available`);
+    }
   };
 
   return (
@@ -61,9 +126,62 @@ const Login = () => {
           <p>{isSignUp ? 'Create your account' : 'Welcome back!'}</p>
         </div>
 
+        {error && (
+          <div className="error-message" style={{
+            padding: '10px',
+            marginBottom: '15px',
+            backgroundColor: '#fee',
+            border: '1px solid #fcc',
+            borderRadius: '4px',
+            color: '#c33'
+          }}>
+            {error}
+          </div>
+        )}
+
         <form className="login-form" onSubmit={handleSubmit}>
+          {isSignUp && (
+            <>
+              <div className="form-group">
+                <label htmlFor="firstName">First Name *</label>
+                <input
+                  type="text"
+                  id="firstName"
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  placeholder="Enter your first name"
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="lastName">Last Name *</label>
+                <input
+                  type="text"
+                  id="lastName"
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  placeholder="Enter your last name"
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="businessName">Business Name *</label>
+                <input
+                  type="text"
+                  id="businessName"
+                  value={businessName}
+                  onChange={(e) => setBusinessName(e.target.value)}
+                  placeholder="Enter your business name"
+                  required
+                />
+              </div>
+            </>
+          )}
+
           <div className="form-group">
-            <label htmlFor="email">Email Address</label>
+            <label htmlFor="email">Email Address *</label>
             <input
               type="email"
               id="email"
@@ -75,14 +193,15 @@ const Login = () => {
           </div>
 
           <div className="form-group">
-            <label htmlFor="password">Password</label>
+            <label htmlFor="password">Password *</label>
             <input
               type="password"
               id="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter your password"
+              placeholder={isSignUp ? "Min. 6 characters" : "Enter your password"}
               required
+              minLength={isSignUp ? 6 : undefined}
             />
           </div>
 
@@ -96,8 +215,8 @@ const Login = () => {
             </div>
           )}
 
-          <button type="submit" className="btn-primary">
-            {isSignUp ? 'Sign Up' : 'Sign In'}
+          <button type="submit" className="btn-primary" disabled={loading}>
+            {loading ? 'Please wait...' : (isSignUp ? 'Sign Up' : 'Sign In')}
           </button>
         </form>
 

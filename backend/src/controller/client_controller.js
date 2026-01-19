@@ -97,8 +97,16 @@ const getClientReviews = async (req, res) => {
         const { replied, rating, page = 1, limit = 20 } = req.query;
         const userSlug = req.user.slug || req.user.tenantSlug;
 
+        console.log('📋 Client Reviews Request:');
+        console.log('  User:', req.user.email);
+        console.log('  Role:', req.user.role);
+        console.log('  Tenant Slug:', userSlug);
+        console.log('  Full user object:', JSON.stringify(req.user, null, 2));
+
         // Get client configuration
         const client = await getClientBySlug(userSlug);
+
+        console.log('  Client found:', client ? client.businessName : 'NOT FOUND');
 
         if (!client) {
             return res.status(404).json({
@@ -114,8 +122,13 @@ const getClientReviews = async (req, res) => {
             });
         }
 
+        console.log('  Sheet Tab:', client.sheetTab);
+        console.log('  GID:', client.gid);
+
         // Get all reviews for this client
-        let reviews = await getReviewsByTab(client.sheetTab);
+        let reviews = await getReviewsByTab(client.sheetTab, client.gid);
+
+        console.log('  ✅ Fetched', reviews.length, 'reviews');
 
         // Add client info to reviews
         reviews = reviews.map(review => ({
@@ -137,7 +150,8 @@ const getClientReviews = async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Error getting client reviews:', error);
+        console.error('❌ Error getting client reviews:', error);
+        console.error('Error stack:', error.stack);
         res.status(500).json({
             success: false,
             message: 'Failed to get client reviews',

@@ -9,7 +9,7 @@ require('dotenv').config();
 const connectDB = async () => {
     try {
         const mongoURI =
-            process.env.mongoURI || 'mongodb://127.0.0.1:27017/ai-review-management';
+            process.env.mongoURI ;
 
         // Connect to MongoDB (Mongoose v7+ compatible)
         const conn = await mongoose.connect(mongoURI);

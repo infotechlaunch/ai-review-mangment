@@ -13,6 +13,7 @@ export default function Reviews() {
     const [error, setError] = useState(null)
 
     useEffect(() => {
+        // Always fetch reviews when component mounts
         fetchReviews()
     }, [])
 
@@ -21,17 +22,22 @@ export default function Reviews() {
             setLoading(true)
             const result = await apiRequest('/api/client/reviews')
 
-            if (result.success && result.reviews) {
-                // Transform backend data to match component structure
-                const transformedReviews = result.reviews.map((review, index) => ({
-                    id: review.reviewKey || index + 1,
-                    reviewer: review.reviewerName || 'Anonymous',
+            if (result.success && result.data) {
+                // Extract reviews from paginated response
+                const reviewsData = result.data.reviews || result.data || []
+                
+                // Transform backend data to match component structure using normalized fields
+                const transformedReviews = reviewsData.map((review, index) => ({
+                    id: review.review_key || review.ReviewKey || index + 1,
+                    reviewer: review.reviewer_name || review['Reviewer Name'] || 'Anonymous',
                     rating: parseInt(review.rating) || 0,
-                    platform: review.platform || 'Unknown',
-                    date: review.reviewDate || new Date().toISOString().split('T')[0],
-                    sentiment: review.sentiment || 'Neutral',
-                    comment: review.reviewText || '',
-                    reply: review.response || null
+                    platform: 'Google',
+                    date: review.Timestamp || review.timestamp || review.approved_at || new Date().toISOString(),
+                    sentiment: review.sentiment || review.SentimentResult || 'Neutral',
+                    comment: review.review_text || review.Review || '',
+                    reply: review.final_caption || review.edited_reply || review.ai_generated_reply || null,
+                    approvalStatus: review.approval_status || review['Approval Status'] || 'pending',
+                    googleReviewId: review.google_review_id || review['Review ID'],
                 }))
                 setReviews(transformedReviews)
             }
@@ -40,21 +46,8 @@ export default function Reviews() {
         } catch (err) {
             console.error('Error fetching reviews:', err)
             setError(err.message)
+            setReviews([])
             setLoading(false)
-
-            // Use mock data as fallback
-            setReviews([
-                {
-                    id: 1,
-                    reviewer: 'John Smith',
-                    rating: 5,
-                    platform: 'Google',
-                    date: '2024-12-28',
-                    sentiment: 'Positive',
-                    comment: 'Excellent service and amazing food! The staff was very friendly and attentive. Will definitely come back again.',
-                    reply: null
-                }
-            ])
         }
     }
 
@@ -211,65 +204,82 @@ export default function Reviews() {
 
                             {/* Review Table */}
                             <div style={{ overflowX: 'auto' }}>
-                                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                                    <thead>
-                                        <tr style={{
-                                            backgroundColor: 'var(--bg-secondary)',
-                                            borderBottom: '2px solid var(--border-color)'
-                                        }}>
-                                            <th style={{ padding: '12px', textAlign: 'left', fontSize: '13px', fontWeight: '600', color: 'var(--text-secondary)' }}>Reviewer</th>
-                                            <th style={{ padding: '12px', textAlign: 'left', fontSize: '13px', fontWeight: '600', color: 'var(--text-secondary)' }}>Rating</th>
-                                            <th style={{ padding: '12px', textAlign: 'left', fontSize: '13px', fontWeight: '600', color: 'var(--text-secondary)' }}>Platform</th>
-                                            <th style={{ padding: '12px', textAlign: 'left', fontSize: '13px', fontWeight: '600', color: 'var(--text-secondary)' }}>Date</th>
-                                            <th style={{ padding: '12px', textAlign: 'left', fontSize: '13px', fontWeight: '600', color: 'var(--text-secondary)' }}>Sentiment</th>
-                                            <th style={{ padding: '12px', textAlign: 'left', fontSize: '13px', fontWeight: '600', color: 'var(--text-secondary)' }}>Status</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {filteredReviews.map((review) => (
-                                            <tr
-                                                key={review.id}
-                                                onClick={() => setSelectedReview(review)}
-                                                style={{
-                                                    borderBottom: '1px solid var(--border-color)',
-                                                    cursor: 'pointer',
-                                                    backgroundColor: selectedReview?.id === review.id ? 'var(--hover-bg)' : 'transparent',
-                                                    transition: 'background-color 0.2s'
-                                                }}
-                                                onMouseEnter={(e) => {
-                                                    if (selectedReview?.id !== review.id) {
-                                                        e.currentTarget.style.backgroundColor = 'var(--bg-secondary)'
-                                                    }
-                                                }}
-                                                onMouseLeave={(e) => {
-                                                    if (selectedReview?.id !== review.id) {
-                                                        e.currentTarget.style.backgroundColor = 'transparent'
-                                                    }
-                                                }}
-                                            >
-                                                <td style={{ padding: '16px', fontSize: '14px', color: 'var(--text-primary)', fontWeight: '500' }}>
-                                                    {review.reviewer}
-                                                </td>
-                                                <td style={{ padding: '16px', fontSize: '14px' }}>
-                                                    {getRatingStars(review.rating)}
-                                                </td>
-                                                <td style={{ padding: '16px', fontSize: '13px', color: 'var(--text-secondary)' }}>
-                                                    {review.platform}
-                                                </td>
-                                                <td style={{ padding: '16px', fontSize: '13px', color: 'var(--text-secondary)' }}>
-                                                    {new Date(review.date).toLocaleDateString()}
-                                                </td>
-                                                <td style={{ padding: '16px' }}>
-                                                    <span style={{
-                                                        padding: '4px 12px',
-                                                        borderRadius: '12px',
-                                                        fontSize: '12px',
-                                                        fontWeight: '600',
-                                                        backgroundColor: getSentimentColor(review.sentiment) + '20',
-                                                        color: getSentimentColor(review.sentiment)
-                                                    }}>
-                                                        {review.sentiment}
-                                                    </span>
+                                {filteredReviews.length === 0 ? (
+                                    <div style={{ 
+                                        textAlign: 'center', 
+                                        padding: '60px 20px', 
+                                        color: 'var(--text-tertiary)' 
+                                    }}>
+                                        <div style={{ fontSize: '48px', marginBottom: '16px' }}>📝</div>
+                                        <p style={{ fontSize: '16px', fontWeight: '500', marginBottom: '8px' }}>
+                                            No reviews found
+                                        </p>
+                                        <p style={{ fontSize: '13px' }}>
+                                            {reviews.length === 0 
+                                                ? 'Start by fetching reviews from your Google Business Profile' 
+                                                : 'Try adjusting your filters to see more reviews'}
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                        <thead>
+                                            <tr style={{
+                                                backgroundColor: 'var(--bg-secondary)',
+                                                borderBottom: '2px solid var(--border-color)'
+                                            }}>
+                                                <th style={{ padding: '12px', textAlign: 'left', fontSize: '13px', fontWeight: '600', color: 'var(--text-secondary)' }}>Reviewer</th>
+                                                <th style={{ padding: '12px', textAlign: 'left', fontSize: '13px', fontWeight: '600', color: 'var(--text-secondary)' }}>Rating</th>
+                                                <th style={{ padding: '12px', textAlign: 'left', fontSize: '13px', fontWeight: '600', color: 'var(--text-secondary)' }}>Platform</th>
+                                                <th style={{ padding: '12px', textAlign: 'left', fontSize: '13px', fontWeight: '600', color: 'var(--text-secondary)' }}>Date</th>
+                                                <th style={{ padding: '12px', textAlign: 'left', fontSize: '13px', fontWeight: '600', color: 'var(--text-secondary)' }}>Sentiment</th>
+                                                <th style={{ padding: '12px', textAlign: 'left', fontSize: '13px', fontWeight: '600', color: 'var(--text-secondary)' }}>Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {filteredReviews.map((review) => (
+                                                <tr
+                                                    key={review.id}
+                                                    onClick={() => setSelectedReview(review)}
+                                                    style={{
+                                                        borderBottom: '1px solid var(--border-color)',
+                                                        cursor: 'pointer',
+                                                        backgroundColor: selectedReview?.id === review.id ? 'var(--hover-bg)' : 'transparent',
+                                                        transition: 'background-color 0.2s'
+                                                    }}
+                                                    onMouseEnter={(e) => {
+                                                        if (selectedReview?.id !== review.id) {
+                                                            e.currentTarget.style.backgroundColor = 'var(--bg-secondary)'
+                                                        }
+                                                    }}
+                                                    onMouseLeave={(e) => {
+                                                        if (selectedReview?.id !== review.id) {
+                                                            e.currentTarget.style.backgroundColor = 'transparent'
+                                                        }
+                                                    }}
+                                                >
+                                                    <td style={{ padding: '16px', fontSize: '14px', color: 'var(--text-primary)', fontWeight: '500' }}>
+                                                        {review.reviewer}
+                                                    </td>
+                                                    <td style={{ padding: '16px', fontSize: '14px' }}>
+                                                        {getRatingStars(review.rating)}
+                                                    </td>
+                                                    <td style={{ padding: '16px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                                                        {review.platform}
+                                                    </td>
+                                                    <td style={{ padding: '16px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                                                        {new Date(review.date).toLocaleDateString()}
+                                                    </td>
+                                                    <td style={{ padding: '16px' }}>
+                                                        <span style={{
+                                                            padding: '4px 12px',
+                                                            borderRadius: '12px',
+                                                            fontSize: '12px',
+                                                            fontWeight: '600',
+                                                            backgroundColor: getSentimentColor(review.sentiment) + '20',
+                                                            color: getSentimentColor(review.sentiment)
+                                                        }}>
+                                                            {review.sentiment}
+                                                        </span>
                                                 </td>
                                                 <td style={{ padding: '16px', fontSize: '13px' }}>
                                                     {review.reply ? (
@@ -282,6 +292,7 @@ export default function Reviews() {
                                         ))}
                                     </tbody>
                                 </table>
+                                )}
                             </div>
                         </div>
                     </div>

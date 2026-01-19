@@ -11,14 +11,18 @@ import ProsCons from './components/pages/prosCons'
 import Settings from './components/pages/Settings'
 import Billing from './components/pages/Billing'
 import Login from './components/auth/Login'
+
 import BusinessSetup from './components/onboarding/BusinessSetup'
+import OnboardingSuccess from './components/onboarding/OnboardingSuccess'
 import AdminDashboard from './components/pages/AdminDashboard'
 
 export default function AppRoute() {
     return (
         <Routes>
             <Route path="/login" element={<Login />} />
+           
             <Route path="/onboarding" element={<BusinessSetup />} />
+            <Route path="/onboarding/success" element={<OnboardingSuccess />} />
             <Route path="/admin" element={<AdminDashboard />} />
             <Route path="/" element={<Dashboard />} />
             <Route path="/reviews" element={<Reviews />} />

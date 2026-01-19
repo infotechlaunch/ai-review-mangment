@@ -71,11 +71,9 @@ app.use((err, req, res, next) => {
 // Start server
 const startServer = async () => {
     try {
-        // Connect to MongoDB if enabled
-        if (USE_MONGODB) {
-            const { connectDB } = require('./src/config/database');
-            await connectDB();
-        }
+        // Always connect to MongoDB (needed for authentication even in Google Sheets mode)
+        const { connectDB } = require('./src/config/database');
+        await connectDB();
 
         // Start Express server
         app.listen(PORT, () => {
@@ -106,6 +104,9 @@ const startServer = async () => {
                 console.log('  - POST   /api/reviews/fetch');
                 console.log('  - PUT    /api/reviews/:id/reply');
                 console.log('  - POST   /api/reviews/:id/approve-reply');
+            } else {
+                console.log('  - GET    /api/client/dashboard');
+                console.log('  - GET    /api/client/reviews');
             }
             console.log('═══════════════════════════════════════════════════════');
             console.log('');

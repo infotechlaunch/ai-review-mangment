@@ -1,7 +1,71 @@
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
+import { apiRequest } from '../../utils/api'
 
 export default function Analytics() {
+    const [stats, setStats] = useState({
+        totalReviews: 0,
+        avgSentiment: 0,
+        responseRate: 0,
+        avgRating: 0
+    })
+    const [loading, setLoading] = useState(true)
+    const [error, setError] = useState(null)
+
+    useEffect(() => {
+        fetchAnalyticsData()
+    }, [])
+
+    const fetchAnalyticsData = async () => {
+        try {
+            setLoading(true)
+            const result = await apiRequest('/api/client/reviews')
+
+            if (result.success && result.data) {
+                const reviews = result.data.reviews || result.data || []
+                const totalReviews = reviews.length
+
+                // Calculate sentiment percentage
+                const positiveReviews = reviews.filter(r =>
+                    r.sentiment?.toLowerCase() === 'positive' || parseInt(r.rating) >= 4
+                ).length
+                const avgSentiment = totalReviews > 0
+                    ? Math.round((positiveReviews / totalReviews) * 100)
+                    : 0
+
+                // Calculate response rate
+                const respondedReviews = reviews.filter(r =>
+                    r.ai_generated_reply || r.edited_reply || r.final_caption
+                ).length
+                const responseRate = totalReviews > 0
+                    ? Math.round((respondedReviews / totalReviews) * 100)
+                    : 0
+
+                // Calculate average rating
+                const ratingsSum = reviews.reduce((sum, r) => {
+                    const rating = parseInt(r.rating) || 0
+                    return sum + rating
+                }, 0)
+                const avgRating = totalReviews > 0
+                    ? (ratingsSum / totalReviews).toFixed(1)
+                    : 0
+
+                setStats({
+                    totalReviews,
+                    avgSentiment,
+                    responseRate,
+                    avgRating: parseFloat(avgRating)
+                })
+            }
+
+            setLoading(false)
+        } catch (err) {
+            console.error('Error fetching analytics data:', err)
+            setError(err.message)
+            setLoading(false)
+        }
+    }
+
     const analyticsCards = [
         {
             title: 'Sentiment Map',
@@ -40,13 +104,44 @@ export default function Analytics() {
         }
     ]
 
-    // Quick stats
+    // Quick stats from real data
     const quickStats = [
-        { label: 'Total Reviews', value: '1,247', change: '+12%', positive: true },
-        { label: 'Avg Sentiment', value: '82%', change: '+5%', positive: true },
-        { label: 'Response Rate', value: '94%', change: '+8%', positive: true },
-        { label: 'Avg Rating', value: '4.3', change: '+0.2', positive: true }
+        { 
+            label: 'Total Reviews', 
+            value: stats.totalReviews.toLocaleString(), 
+            change: 'Live data', 
+            positive: true 
+        },
+        { 
+            label: 'Avg Sentiment', 
+            value: `${stats.avgSentiment}%`, 
+            change: 'Positive rate', 
+            positive: true 
+        },
+        { 
+            label: 'Response Rate', 
+            value: `${stats.responseRate}%`, 
+            change: 'With AI replies', 
+            positive: true 
+        },
+        { 
+            label: 'Avg Rating', 
+            value: stats.avgRating, 
+            change: 'Out of 5 stars', 
+            positive: true 
+        }
     ]
+
+    if (loading) {
+        return (
+            <div className="page-container">
+                <div className="page-header">
+                    <h1 className="page-title">Analytics Dashboard</h1>
+                    <p className="page-subtitle">Loading analytics data...</p>
+                </div>
+            </div>
+        )
+    }
 
     return (
         <div className="page-container">
@@ -68,10 +163,10 @@ export default function Analytics() {
                                 </div>
                                 <div style={{ 
                                     fontSize: '13px', 
-                                    color: stat.positive ? '#10b981' : '#ef4444',
-                                    fontWeight: '600'
+                                    color: 'var(--text-tertiary)',
+                                    fontWeight: '500'
                                 }}>
-                                    {stat.positive ? '↑' : '↓'} {stat.change} from last month
+                                    {stat.change}
                                 </div>
                             </div>
                         </div>

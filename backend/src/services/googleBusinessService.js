@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { myBusinessLimiter } = require('../utils/rateLimiter');
 
 /**
  * Google Business Profile API Service
@@ -6,6 +7,42 @@ const axios = require('axios');
  */
 
 const GOOGLE_API_BASE = 'https://mybusiness.googleapis.com/v4';
+
+// Rate limiting configuration
+const RETRY_CONFIG = {
+    maxRetries: 3,
+    initialDelay: 1000, // 1 second
+    maxDelay: 60000, // 60 seconds
+    backoffMultiplier: 2
+};
+
+/**
+ * Sleep utility for delays
+ */
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Retry function with exponential backoff for quota errors
+ */
+const retryWithBackoff = async (fn, retries = RETRY_CONFIG.maxRetries, delay = RETRY_CONFIG.initialDelay) => {
+    try {
+        return await fn();
+    } catch (error) {
+        // Check if it's a quota/rate limit error
+        const isRateLimitError = error.response?.status === 429 ||
+            error.response?.data?.error?.code === 429 ||
+            (error.response?.data?.error?.message &&
+                error.response.data.error.message.includes('Quota exceeded'));
+
+        if (isRateLimitError && retries > 0) {
+            console.log(`⏳ Rate limit hit. Retrying in ${delay}ms... (${retries} retries left)`);
+            await sleep(delay);
+            const nextDelay = Math.min(delay * RETRY_CONFIG.backoffMultiplier, RETRY_CONFIG.maxDelay);
+            return retryWithBackoff(fn, retries - 1, nextDelay);
+        }
+        throw error;
+    }
+};
 
 /**
  * Fetch reviews from Google Business Profile
@@ -18,11 +55,16 @@ const fetchGoogleReviews = async (accountId, locationId, accessToken) => {
     try {
         const url = `${GOOGLE_API_BASE}/accounts/${accountId}/locations/${locationId}/reviews`;
 
-        const response = await axios.get(url, {
-            headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'Content-Type': 'application/json',
-            },
+        // Wrap the API call with retry logic and rate limiting
+        const response = await retryWithBackoff(async () => {
+            return await myBusinessLimiter.execute(async () => {
+                return await axios.get(url, {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type': 'application/json',
+                    },
+                });
+            });
         });
 
         const reviews = response.data.reviews || [];
@@ -59,13 +101,18 @@ const postReplyToGoogle = async (accountId, locationId, reviewId, replyText, acc
     try {
         const url = `${GOOGLE_API_BASE}/accounts/${accountId}/locations/${locationId}/reviews/${reviewId}/reply`;
 
-        const response = await axios.put(url, {
-            comment: replyText,
-        }, {
-            headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'Content-Type': 'application/json',
-            },
+        // Wrap the API call with retry logic and rate limiting
+        const response = await retryWithBackoff(async () => {
+            return await myBusinessLimiter.execute(async () => {
+                return await axios.put(url, {
+                    comment: replyText,
+                }, {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type': 'application/json',
+                    },
+                });
+            });
         });
 
         console.log(`✓ Posted reply to Google for review ${reviewId}`);
