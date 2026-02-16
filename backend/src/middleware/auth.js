@@ -31,15 +31,24 @@ const authenticate = async (req, res, next) => {
         req.user = decoded;
 
         // For non-admin users, fetch full user details to get tenant
-        if (decoded.role !== 'ADMIN') {
-            const user = await User.findById(decoded.userId).select('-password');
+        if (decoded.role !== 'ADMIN' && decoded.role !== 'SUPER_ADMIN') {
+            const user = await User.findByPk(decoded.userId, {
+                attributes: { exclude: ['password'] }
+            });
             if (!user) {
                 return res.status(401).json({
                     success: false,
                     message: 'User not found',
                 });
             }
-            req.user.tenant = user.tenant;
+            // Set tenant from JWT token OR from database (for old tokens)
+            req.user.tenant = decoded.tenant || user.tenantId;
+            req.user.tenantId = decoded.tenant || user.tenantId;
+
+            // If token doesn't have tenant but user has one, it's an old token
+            if (!decoded.tenant && user.tenantId) {
+                console.log(`⚠️ Old JWT token detected for user ${user.email} - tenant missing from token`);
+            }
         }
 
         next();

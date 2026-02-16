@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { apiRequest } from '../../utils/api'
+import './common.css'
 
 export default function ProsCons() {
     const [pros, setPros] = useState([])

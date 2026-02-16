@@ -4,12 +4,11 @@ const cors = require('cors');
 
 /**
  * AI Review Management System Backend
- * Hybrid Mode: Google Sheets + AI Features
+ * Database: PostgreSQL (via Sequelize)
  */
 
 const app = express();
 const PORT = process.env.PORT || 4000;
-const USE_MONGODB = process.env.USE_MONGODB === 'true'; // Toggle between MongoDB and Google Sheets
 
 // Middleware
 app.use(cors());
@@ -18,7 +17,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // Request logging middleware
 app.use((req, res, next) => {
-    console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+
     next();
 });
 
@@ -27,7 +26,7 @@ app.get('/health', (req, res) => {
     res.json({
         success: true,
         message: 'AI Review Management API is running',
-        mode: USE_MONGODB ? 'MongoDB' : 'Google Sheets',
+        database: 'PostgreSQL',
         timestamp: new Date().toISOString(),
         environment: process.env.NODE_ENV || 'development',
     });
@@ -37,16 +36,37 @@ app.get('/health', (req, res) => {
 app.use('/api/auth', require('./src/routers/auth_route'));
 app.use('/api/google-oauth', require('./src/routers/google_oauth_route'));
 
-// Use different routes based on mode
-if (USE_MONGODB) {
-    // MongoDB mode: Full CRUD operations
-    app.use('/api/admin', require('./src/routers/admin_route'));
-    app.use('/api/reviews', require('./src/routers/review_route'));
-} else {
-    // Google Sheets mode: Hybrid with AI features
-    app.use('/api/admin', require('./src/routers/admin_route_hybrid'));
-    app.use('/api/reviews', require('./src/routers/review_route_hybrid'));
-    app.use('/api/client', require('./src/routers/client_route'));
+// Admin Routes
+app.use('/api/admin', require('./src/routers/admin_route'));
+
+// Monitoring Routes (quota, health, etc.)
+app.use('/api/monitor', require('./src/routers/monitor_route'));
+
+// Review Routes
+app.use('/api/reviews', require('./src/routers/review_route'));
+// File name kept for path consistency, content is Postgres
+
+// 🔧 DEV ONLY: Clear Google quota cooldown
+if (process.env.NODE_ENV !== 'production') {
+    app.post('/api/dev/clear-google-cooldown', (req, res) => {
+        try {
+            const { quotaCooldowns } = require('./src/controller/google_oauth_controller');
+            const size = quotaCooldowns.size;
+            quotaCooldowns.clear();
+            console.log(`✅ Cleared ${size} quota cooldown(s)`);
+            res.json({
+                success: true,
+                message: `Cooldown cleared. ${size} tenant(s) unblocked.`,
+                clearedCount: size
+            });
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                message: 'Failed to clear cooldown',
+                error: error.message
+            });
+        }
+    });
 }
 
 // 404 handler
@@ -71,52 +91,13 @@ app.use((err, req, res, next) => {
 // Start server
 const startServer = async () => {
     try {
-        // Always connect to MongoDB (needed for authentication even in Google Sheets mode)
+        // Connect to Database
         const { connectDB } = require('./src/config/database');
         await connectDB();
 
         // Start Express server
         app.listen(PORT, () => {
-            console.log('');
-            console.log('═══════════════════════════════════════════════════════');
-            console.log('  AI Review Management System - Backend Server');
-            console.log('═══════════════════════════════════════════════════════');
-            console.log(`  Server running on: http://localhost:${PORT}`);
-            console.log(`  Mode: ${USE_MONGODB ? 'MongoDB' : 'Google Sheets (Hybrid)'}`);
-            console.log(`  Environment: ${process.env.NODE_ENV || 'development'}`);
-            console.log(`  Health check: http://localhost:${PORT}/health`);
-            console.log('═══════════════════════════════════════════════════════');
-            console.log('');
-            console.log('  Available Routes:');
-            console.log('  - POST   /api/auth/login');
-            console.log('  - POST   /api/auth/register/client');
-            console.log('  - GET    /api/auth/verify');
-            console.log('  - GET    /api/google-oauth/connect');
-            console.log('  - GET    /api/google-oauth/status');
-            console.log('  - POST   /api/google-oauth/disconnect');
-            console.log('  - GET    /api/admin/dashboard');
-            console.log('  - GET    /api/admin/clients');
-            console.log('  - GET    /api/reviews');
-            console.log('  - GET    /api/reviews/stats');
-            console.log('  - GET    /api/reviews/:reviewKey');
-            console.log('  - POST   /api/reviews/:reviewKey/generate-reply');
-            if (USE_MONGODB) {
-                console.log('  - POST   /api/reviews/fetch');
-                console.log('  - PUT    /api/reviews/:id/reply');
-                console.log('  - POST   /api/reviews/:id/approve-reply');
-            } else {
-                console.log('  - GET    /api/client/dashboard');
-                console.log('  - GET    /api/client/reviews');
-            }
-            console.log('═══════════════════════════════════════════════════════');
-            console.log('');
-            if (!USE_MONGODB) {
-                console.log('  📝 Note: Running in Google Sheets mode');
-                console.log('  ✨ AI reply generation enabled!');
-                console.log('  ⚠️  Write operations to Google Sheets are read-only');
-                console.log('  💡 Set USE_MONGODB=true in .env to enable full features');
-                console.log('');
-            }
+            console.log("Server listening on Port", PORT);
         });
 
     } catch (error) {

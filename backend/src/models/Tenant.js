@@ -1,56 +1,80 @@
-const mongoose = require('mongoose');
+const { DataTypes } = require('sequelize');
+const { sequelize } = require('../config/database');
 
-/**
- * Tenant Schema
- * Represents a client namespace for multi-tenant data isolation
- */
-
-const tenantSchema = new mongoose.Schema({
+const Tenant = sequelize.define('Tenant', {
+    id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true
+    },
     name: {
-        type: String,
-        required: true,
-        trim: true,
+        type: DataTypes.STRING,
+        allowNull: false,
+        validate: {
+            notEmpty: true
+        }
     },
     slug: {
-        type: String,
-        required: true,
+        type: DataTypes.STRING,
+        allowNull: false,
         unique: true,
-        lowercase: true,
-        trim: true,
+        validate: {
+            notEmpty: true,
+            isLowercase: true
+        }
     },
     businessName: {
-        type: String,
-        required: true,
-        trim: true,
+        type: DataTypes.STRING,
+        allowNull: false,
+        validate: {
+            notEmpty: true
+        }
     },
     isActive: {
-        type: Boolean,
-        default: true,
+        type: DataTypes.BOOLEAN,
+        defaultValue: true
     },
     // Google Business Profile configuration
-    googleBusinessProfile: {
-        accountId: String,
-        locationId: String,
-        accessToken: String,
-        refreshToken: String,
-        tokenExpiry: Date,
+    gbp_accountId: DataTypes.STRING,
+    gbp_locationId: DataTypes.STRING,
+    gbp_accessToken: DataTypes.TEXT,
+    gbp_refreshToken: DataTypes.TEXT,
+    gbp_tokenExpiry: DataTypes.DATE,
+    gbp_initialSyncDone: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false
     },
-    createdAt: {
-        type: Date,
-        default: Date.now,
-    },
-    updatedAt: {
-        type: Date,
-        default: Date.now,
-    },
+    gbp_lastSyncAt: DataTypes.DATE,
+
+    // Application Settings (stored as JSONB)
+    settings: {
+        type: DataTypes.JSONB,
+        defaultValue: {
+            autoApproval: {
+                positive: true,
+                neutral: false,
+                negative: false,
+                minRating: 4
+            },
+            tone: {
+                style: 'professional',
+                keywords: '',
+                maxLength: 150
+            },
+            automation: {
+                enabled: false,
+                channels: [],
+                daysAfterVisit: 2,
+                monthlyLimit: 1
+            }
+        }
+    }
 }, {
     timestamps: true,
+    indexes: [
+        { unique: true, fields: ['slug'] },
+        { fields: ['isActive'] }
+    ]
 });
-
-// Index for faster queries
-tenantSchema.index({ slug: 1 });
-tenantSchema.index({ isActive: 1 });
-
-const Tenant = mongoose.model('Tenant', tenantSchema);
 
 module.exports = Tenant;

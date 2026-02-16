@@ -1,60 +1,58 @@
-const mongoose = require('mongoose');
+const { DataTypes } = require('sequelize');
+const { sequelize } = require('../config/database');
+const Tenant = require('./Tenant');
 
-/**
- * Location Schema
- * Represents a business location (slug) within a tenant
- */
-
-const locationSchema = new mongoose.Schema({
-    tenant: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Tenant',
-        required: true,
+const Location = sequelize.define('Location', {
+    id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true
+    },
+    tenantId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        references: {
+            model: Tenant,
+            key: 'id'
+        }
     },
     slug: {
-        type: String,
-        required: true,
-        lowercase: true,
-        trim: true,
+        type: DataTypes.STRING,
+        allowNull: false,
+        validate: {
+            notEmpty: true,
+            isLowercase: true
+        }
     },
     name: {
-        type: String,
-        required: true,
-        trim: true,
+        type: DataTypes.STRING,
+        allowNull: false,
     },
     address: {
-        type: String,
-        trim: true,
+        type: DataTypes.STRING,
     },
     // Google Business Profile location details
     googleLocationId: {
-        type: String,
+        type: DataTypes.STRING,
         unique: true,
-        sparse: true,
     },
     googleAccountId: {
-        type: String,
+        type: DataTypes.STRING,
     },
     isActive: {
-        type: Boolean,
-        default: true,
-    },
-    createdAt: {
-        type: Date,
-        default: Date.now,
-    },
-    updatedAt: {
-        type: Date,
-        default: Date.now,
-    },
+        type: DataTypes.BOOLEAN,
+        defaultValue: true,
+    }
 }, {
     timestamps: true,
+    indexes: [
+        { unique: true, fields: ['tenantId', 'slug'] },
+        { fields: ['googleLocationId'] }
+    ]
 });
 
-// Compound index for tenant + slug uniqueness
-locationSchema.index({ tenant: 1, slug: 1 }, { unique: true });
-locationSchema.index({ googleLocationId: 1 });
-
-const Location = mongoose.model('Location', locationSchema);
+// Association
+Location.belongsTo(Tenant, { foreignKey: 'tenantId', as: 'tenant' });
+Tenant.hasMany(Location, { foreignKey: 'tenantId' });
 
 module.exports = Location;

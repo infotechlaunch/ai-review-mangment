@@ -14,23 +14,31 @@ const openai = new OpenAI({
  * @param {string} reviewText - The review text
  * @param {number} rating - The review rating (1-5)
  * @param {string} businessName - Name of the business
+ * @param {object} settings - Tone settings { style, keywords, maxLength }
  * @returns {Promise<string>} Generated reply
  */
-const generateReply = async (reviewText, rating, businessName = 'our business') => {
+const generateReply = async (reviewText, rating, businessName = 'our business', settings = {}) => {
     try {
+        const {
+            style = 'professional',
+            keywords = '',
+            maxLength = 200
+        } = settings;
+
         const prompt = `You are a professional customer service representative for ${businessName}. 
-Generate a polite, professional, and personalized response to the following customer review.
+Generate a ${style} and personalized response to the following customer review.
 
 Review Rating: ${rating}/5
 Review Text: "${reviewText}"
 
 Guidelines:
-- Be professional and courteous
+- Tone: ${style}
+- Max Length: ${maxLength} characters
+- ${keywords ? `Include these keywords if natural: ${keywords}` : ''}
 - Thank the customer for their feedback
 - ${rating >= 4 ? 'Express appreciation for their positive experience' : 'Acknowledge their concerns and show empathy'}
 - ${rating < 3 ? 'Apologize for any inconvenience and offer to make things right' : ''}
-- Keep the response concise (2-3 sentences)
-- Use a warm, friendly tone
+- Keep the response naturally flowing
 - Do not use generic templates
 
 Generate only the reply text, without any labels or prefixes.`;

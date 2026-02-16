@@ -51,14 +51,18 @@ class RateLimiter {
 }
 
 // Create rate limiters for different Google APIs
-// Google Business Account Management API: 60 requests per minute
-const accountManagementLimiter = new RateLimiter(50, 60000); // Being conservative with 50/min
+// Google allows 1000 requests per 100 seconds - we'll use 80% of that for safety
+// Distributed across 100 seconds to stay well under the limit
 
-// Google Business Information API: 60 requests per minute  
-const businessInfoLimiter = new RateLimiter(50, 60000);
+// Google Business Account Management API: 200 requests per 100 seconds
+const accountManagementLimiter = new RateLimiter(200, 100000);
 
-// Google My Business API (v4): 1,500 requests per day, but keep it lower
-const myBusinessLimiter = new RateLimiter(20, 60000); // 20 per minute to be safe
+// Google Business Information API: 200 requests per 100 seconds
+const businessInfoLimiter = new RateLimiter(200, 100000);
+
+// Google My Business API (v4 - Reviews): 300 requests per 100 seconds
+// This is the most used API, so we give it more headroom
+const myBusinessLimiter = new RateLimiter(300, 100000);
 
 module.exports = {
     RateLimiter,

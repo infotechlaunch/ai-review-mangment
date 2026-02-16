@@ -3,10 +3,13 @@ const router = express.Router();
 const {
     initiateOAuthFlow,
     handleOAuthCallback,
+    syncGoogleLocations,
     getConnectionStatus,
     disconnectGoogleAccount,
     fetchAndSyncReviews,
     getLocations,
+    verifyGoogleBusinessAccount,
+    initialGoogleSync,
 } = require('../controller/google_oauth_controller');
 const { authenticate, authorize } = require('../middleware/auth');
 
@@ -38,6 +41,13 @@ router.get('/connect-onboarding/:tenantId', initiateOAuthFlow);
 router.get('/callback', handleOAuthCallback);
 
 /**
+ * @route   POST /api/google-oauth/sync-locations
+ * @desc    Sync Google Business locations after OAuth connection
+ * @access  CLIENT_OWNER, STAFF
+ */
+router.post('/sync-locations', authenticate, authorize(['CLIENT_OWNER', 'STAFF']), syncGoogleLocations);
+
+/**
  * @route   GET /api/google-oauth/status
  * @desc    Get Google Business connection status
  * @access  CLIENT_OWNER, STAFF
@@ -59,10 +69,24 @@ router.post('/disconnect', authenticate, authorize(['CLIENT_OWNER']), disconnect
 router.get('/locations', authenticate, authorize(['CLIENT_OWNER', 'STAFF']), getLocations);
 
 /**
+ * @route   POST /api/google-oauth/initial-sync
+ * @desc    Initial one-time sync after OAuth - fetches account, locations, and reviews
+ * @access  CLIENT_OWNER, STAFF
+ */
+router.post('/initial-sync', authenticate, authorize(['CLIENT_OWNER', 'STAFF']), initialGoogleSync);
+
+/**
  * @route   POST /api/google-oauth/sync-reviews
- * @desc    Fetch and sync reviews from Google for all locations
+ * @desc    Fetch and sync reviews from Google for all locations (ADMIN/MANUAL only)
  * @access  CLIENT_OWNER, STAFF
  */
 router.post('/sync-reviews', authenticate, authorize(['CLIENT_OWNER', 'STAFF']), fetchAndSyncReviews);
+
+/**
+ * @route   GET /api/google-oauth/verify-business-account
+ * @desc    Verify if the connected Google account has a Google Business Profile (INTERNAL only)
+ * @access  CLIENT_OWNER, STAFF
+ */
+router.get('/verify-business-account', authenticate, authorize(['CLIENT_OWNER', 'STAFF']), verifyGoogleBusinessAccount);
 
 module.exports = router;

@@ -1,86 +1,70 @@
-const mongoose = require('mongoose');
+const { DataTypes } = require('sequelize');
 const bcrypt = require('bcryptjs');
+const { sequelize } = require('../config/database');
+const Tenant = require('./Tenant');
 
-/**
- * User Schema
- * Represents users in the system (ADMIN, CLIENT_OWNER, STAFF)
- */
-
-const userSchema = new mongoose.Schema({
+const User = sequelize.define('User', {
+    id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true
+    },
     email: {
-        type: String,
-        required: true,
+        type: DataTypes.STRING,
+        allowNull: false,
         unique: true,
-        lowercase: true,
-        trim: true,
+        validate: {
+            isEmail: true,
+            notEmpty: true
+        },
+        set(value) {
+            this.setDataValue('email', value.toLowerCase());
+        }
     },
     password: {
-        type: String,
-        required: true,
+        type: DataTypes.STRING,
+        allowNull: false,
     },
     role: {
-        type: String,
-        enum: ['ADMIN', 'CLIENT_OWNER', 'STAFF'],
-        required: true,
+        type: DataTypes.ENUM('SUPER_ADMIN', 'ADMIN', 'CLIENT_OWNER', 'STAFF'),
+        allowNull: false,
     },
-    tenant: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Tenant',
-        required: function () {
-            return this.role !== 'ADMIN'; // Only non-admin users need a tenant
+    tenantId: {
+        type: DataTypes.UUID,
+        references: {
+            model: Tenant,
+            key: 'id'
         },
+        allowNull: true // Only client-facing roles need this
     },
     firstName: {
-        type: String,
-        trim: true,
+        type: DataTypes.STRING,
     },
     lastName: {
-        type: String,
-        trim: true,
+        type: DataTypes.STRING,
     },
     isActive: {
-        type: Boolean,
-        default: true,
-    },
-    createdAt: {
-        type: Date,
-        default: Date.now,
-    },
-    updatedAt: {
-        type: Date,
-        default: Date.now,
-    },
+        type: DataTypes.BOOLEAN,
+        defaultValue: true,
+    }
 }, {
     timestamps: true,
-});
-
-// Hash password before saving
-userSchema.pre('save', async function (next) {
-    if (!this.isModified('password')) {
-       
-    }
-
-    try {
-        const salt = await bcrypt.genSalt(10);
-        this.password = await bcrypt.hash(this.password, salt);
-        
-    } catch (error) {
-        
+    hooks: {
+        beforeSave: async (user) => {
+            if (user.changed('password')) {
+                const salt = await bcrypt.genSalt(10);
+                user.password = await bcrypt.hash(user.password, salt);
+            }
+        }
     }
 });
 
-// Method to compare password
-userSchema.methods.comparePassword = async function (candidatePassword) {
+User.prototype.comparePassword = async function (candidatePassword) {
     return await bcrypt.compare(candidatePassword, this.password);
 };
 
-// Remove password from JSON output
-userSchema.methods.toJSON = function () {
-    const obj = this.toObject();
-    delete obj.password;
-    return obj;
-};
-
-const User = mongoose.model('User', userSchema);
+// Association
+User.belongsTo(Tenant, { foreignKey: 'tenantId', as: 'tenant' });
+Tenant.hasMany(User, { foreignKey: 'tenantId' });
 
 module.exports = User;

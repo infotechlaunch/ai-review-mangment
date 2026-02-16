@@ -1,6 +1,7 @@
 const { generateToken } = require('../config/jwt');
 const User = require('../models/User');
 const Tenant = require('../models/Tenant');
+const { google } = require('googleapis');
 
 /**
  * Authentication Controller
@@ -27,8 +28,14 @@ const login = async (req, res) => {
         }
 
         // Find user by email
-        const user = await User.findOne({ email: email.toLowerCase() })
-            .populate('tenant', 'name slug businessName');
+        const user = await User.findOne({
+            where: { email: email.toLowerCase() },
+            include: [{
+                model: Tenant,
+                as: 'tenant',
+                attributes: ['id', 'name', 'slug', 'businessName', 'gbp_accessToken', 'gbp_refreshToken']
+            }]
+        });
 
         if (!user) {
             return res.status(401).json({
@@ -57,14 +64,14 @@ const login = async (req, res) => {
 
         // Generate JWT token
         const tokenPayload = {
-            userId: user._id,
+            userId: user.id,
             email: user.email,
             role: user.role,
         };
 
         // Add tenant info for non-admin users
         if (user.role !== 'ADMIN' && user.tenant) {
-            tokenPayload.tenant = user.tenant._id;
+            tokenPayload.tenant = user.tenant.id;
             tokenPayload.tenantSlug = user.tenant.slug;
         }
 
@@ -84,7 +91,7 @@ const login = async (req, res) => {
         // Add tenant info for non-admin users
         if (user.role !== 'ADMIN' && user.tenant) {
             response.tenant = {
-                id: user.tenant._id,
+                id: user.tenant.id,
                 name: user.tenant.name,
                 slug: user.tenant.slug,
                 businessName: user.tenant.businessName,
@@ -93,7 +100,10 @@ const login = async (req, res) => {
 
         console.log(`✓ User logged in: ${user.email} (${user.role})`);
 
-        res.json(response);
+        res.json({
+            ...response,
+            isOnboarded: !!(user.tenant && user.tenant.gbp_refreshToken)
+        });
 
     } catch (error) {
         console.error('Login error:', error);
@@ -113,9 +123,14 @@ const login = async (req, res) => {
 const verifyTokenEndpoint = async (req, res) => {
     try {
         // req.user is populated by authenticate middleware
-        const user = await User.findById(req.user.userId)
-            .select('-password')
-            .populate('tenant', 'name slug businessName');
+        const user = await User.findByPk(req.user.userId, {
+            attributes: { exclude: ['password'] },
+            include: [{
+                model: Tenant,
+                as: 'tenant',
+                attributes: ['id', 'name', 'slug', 'businessName']
+            }]
+        });
 
         if (!user) {
             return res.status(404).json({
@@ -127,7 +142,7 @@ const verifyTokenEndpoint = async (req, res) => {
         res.json({
             success: true,
             user: {
-                id: user._id,
+                id: user.id,
                 email: user.email,
                 role: user.role,
                 firstName: user.firstName,
@@ -188,7 +203,7 @@ const registerClientOwner = async (req, res) => {
         }
 
         // Check if user already exists
-        const existingUser = await User.findOne({ email: email.toLowerCase() });
+        const existingUser = await User.findOne({ where: { email: email.toLowerCase() } });
         if (existingUser) {
             return res.status(409).json({
                 success: false,
@@ -211,7 +226,7 @@ const registerClientOwner = async (req, res) => {
         }
 
         // Check if tenant slug already exists
-        const existingTenant = await Tenant.findOne({ slug: tenantSlug });
+        const existingTenant = await Tenant.findOne({ where: { slug: tenantSlug } });
         if (existingTenant) {
             return res.status(409).json({
                 success: false,
@@ -220,36 +235,34 @@ const registerClientOwner = async (req, res) => {
         }
 
         // Create tenant
-        const tenant = new Tenant({
+        const tenant = await Tenant.create({
             name: businessName,
             slug: tenantSlug,
             businessName: businessName,
             isActive: true,
         });
 
-        await tenant.save();
         console.log(`✓ Tenant created: ${tenant.businessName} (${tenant.slug})`);
 
         // Create CLIENT_OWNER user
-        const user = new User({
+        const user = await User.create({
             email: email.toLowerCase(),
-            password: password, // Will be hashed by pre-save middleware
+            password: password, // Will be hashed by hooks
             role: 'CLIENT_OWNER',
-            tenant: tenant._id,
+            tenantId: tenant.id,
             firstName: firstName.trim(),
             lastName: lastName.trim(),
             isActive: true,
         });
 
-        await user.save();
         console.log(`✓ CLIENT_OWNER created: ${user.email}`);
 
         // Generate JWT token
         const tokenPayload = {
-            userId: user._id,
+            userId: user.id,
             email: user.email,
             role: user.role,
-            tenant: tenant._id,
+            tenant: tenant.id,
             tenantSlug: tenant.slug,
         };
 
@@ -264,7 +277,7 @@ const registerClientOwner = async (req, res) => {
             lastName: user.lastName,
             token,
             tenant: {
-                id: tenant._id,
+                id: tenant.id,
                 name: tenant.name,
                 slug: tenant.slug,
                 businessName: tenant.businessName,
@@ -287,8 +300,131 @@ const registerClientOwner = async (req, res) => {
     }
 };
 
+/**
+ * Initiate Google Login Flow
+ * @route GET /api/auth/google
+ */
+const googleLogin = async (req, res) => {
+    try {
+        const oauth2Client = new google.auth.OAuth2(
+            process.env.GOOGLE_CLIENT_ID,
+            process.env.GOOGLE_CLIENT_SECRET,
+            process.env.GOOGLE_AUTH_REDIRECT_URI || 'http://localhost:4000/api/auth/google/callback'
+        );
+
+        const scopes = [
+            'https://www.googleapis.com/auth/userinfo.email',
+            'https://www.googleapis.com/auth/userinfo.profile'
+        ];
+
+        const url = oauth2Client.generateAuthUrl({
+            access_type: 'online',
+            scope: scopes
+        });
+
+        res.redirect(url);
+    } catch (error) {
+        console.error('Google login error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to initiate Google login'
+        });
+    }
+};
+
+/**
+ * Handle Google Login Callback
+ * @route GET /api/auth/google/callback
+ */
+const googleCallback = async (req, res) => {
+    try {
+        const { code } = req.query;
+
+        const oauth2Client = new google.auth.OAuth2(
+            process.env.GOOGLE_CLIENT_ID,
+            process.env.GOOGLE_CLIENT_SECRET,
+            process.env.GOOGLE_AUTH_REDIRECT_URI || 'http://localhost:4000/api/auth/google/callback'
+        );
+
+        const { tokens } = await oauth2Client.getToken(code);
+        oauth2Client.setCredentials(tokens);
+
+        const oauth2 = google.oauth2({
+            auth: oauth2Client,
+            version: 'v2'
+        });
+
+        const { data: googleUser } = await oauth2.userinfo.get();
+        const { email, given_name, family_name, id: googleId } = googleUser;
+
+        // Check if user exists
+        let user = await User.findOne({
+            where: { email: email.toLowerCase() },
+            include: [{
+                model: Tenant,
+                as: 'tenant',
+                attributes: ['id', 'name', 'slug', 'businessName', 'gbp_accessToken', 'gbp_refreshToken']
+            }]
+        });
+
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+        if (user) {
+            // LOGIN SUCCESS
+
+            // Generate Token
+            const tokenPayload = {
+                userId: user.id,
+                email: user.email,
+                role: user.role,
+            };
+
+            if (user.role !== 'ADMIN' && user.tenant) {
+                tokenPayload.tenant = user.tenant.id;
+                tokenPayload.tenantSlug = user.tenant.slug;
+            }
+
+            const token = generateToken(tokenPayload);
+
+            // Redirect to frontend with token
+            // We encode the user data to pass it safely
+            const userData = encodeURIComponent(JSON.stringify({
+                token,
+                role: user.role,
+                email: user.email,
+                userName: `${user.firstName} ${user.lastName}`,
+                tenantId: user.tenant?.id,
+                tenantSlug: user.tenant?.slug,
+                businessName: user.tenant?.businessName,
+                isOnboarded: !!(user.tenant && user.tenant.gbp_refreshToken)
+            }));
+
+            return res.redirect(`${frontendUrl}/login?google_auth=success&data=${userData}`);
+
+        } else {
+            // USER NOT FOUND -> Redirect to Signup
+            // Pass pre-filled data
+            const signupData = encodeURIComponent(JSON.stringify({
+                email,
+                firstName: given_name,
+                lastName: family_name,
+                googleId // Potentially useful if we want to validte later
+            }));
+
+            return res.redirect(`${frontendUrl}/login?google_auth=signup&data=${signupData}`);
+        }
+
+    } catch (error) {
+        console.error('Google callback error:', error);
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+        res.redirect(`${frontendUrl}/login?error=${encodeURIComponent('Google login failed')}`);
+    }
+};
+
 module.exports = {
     login,
     verifyTokenEndpoint,
     registerClientOwner,
+    googleLogin,
+    googleCallback,
 };

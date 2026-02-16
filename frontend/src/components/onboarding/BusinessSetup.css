@@ -16,7 +16,10 @@
   max-width: 800px;
   width: 100%;
   animation: slideUp 0.5s ease-in;
-  transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+  transition:
+    background-color 0.3s ease,
+    border-color 0.3s ease,
+    box-shadow 0.3s ease;
 }
 
 @keyframes slideUp {
@@ -27,6 +30,15 @@
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
   }
 }
 
@@ -93,7 +105,9 @@
 .progress-fill {
   height: 100%;
   background: var(--primary-color);
-  transition: width 0.3s ease, background-color 0.3s ease;
+  transition:
+    width 0.3s ease,
+    background-color 0.3s ease;
 }
 
 /* Step Content */
@@ -222,7 +236,9 @@
   font-size: 14px;
   font-weight: bold;
   opacity: 0;
-  transition: opacity 0.3s ease, background-color 0.3s ease;
+  transition:
+    opacity 0.3s ease,
+    background-color 0.3s ease;
 }
 
 .platform-card.selected .platform-check {
@@ -236,7 +252,9 @@
   padding: 12px;
   background: var(--hover-bg);
   border-radius: 8px;
-  transition: color 0.3s ease, background-color 0.3s ease;
+  transition:
+    color 0.3s ease,
+    background-color 0.3s ease;
 }
 
 /* Step 3 - Connect Accounts */
@@ -251,7 +269,9 @@
   border: 2px solid var(--border-color);
   border-radius: 12px;
   background: var(--bg-secondary);
-  transition: background-color 0.3s ease, border-color 0.3s ease;
+  transition:
+    background-color 0.3s ease,
+    border-color 0.3s ease;
 }
 
 .connection-header {

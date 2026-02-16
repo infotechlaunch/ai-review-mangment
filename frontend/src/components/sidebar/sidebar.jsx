@@ -1,6 +1,7 @@
 import React from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import './sidebar.css'
+import { handleLinkHover } from '../../utils/routePrefetch'
 import logo from '../../assets/logo.svg'
 import dashboardIcon from '../../assets/sidebar-icons/dashboard (1).svg'
 import reviewIcon from '../../assets/sidebar-icons/review-icon-8101227-512.svg'
@@ -41,7 +42,11 @@ export default function Sidebar() {
                 <ul>
                     {menuItems.map((item) => (
                         <li key={item.path} className={location.pathname === item.path ? 'active' : ''}>
-                            <Link to={item.path}>
+                            <Link 
+                                to={item.path}
+                                onMouseEnter={() => handleLinkHover(item.path)}
+                                onFocus={() => handleLinkHover(item.path)}
+                            >
                                 <span className="icon">
                                     {typeof item.icon === 'string' && item.icon.length < 3 ? (
                                         item.icon

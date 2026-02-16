@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import './common.css'
 
 export default function Billing() {
     // Mock billing data

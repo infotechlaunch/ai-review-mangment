@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const Tenant = require('../models/Tenant');
 const Review = require('../models/Review');
+const Location = require('../models/Location');
 
 /**
  * Admin Controller
@@ -14,18 +15,19 @@ const Review = require('../models/Review');
  */
 const getClients = async (req, res) => {
     try {
-        const clients = await Tenant.find()
-            .select('name slug businessName isActive createdAt')
-            .sort({ createdAt: -1 });
+        const clients = await Tenant.findAll({
+            attributes: ['id', 'name', 'slug', 'businessName', 'isActive', 'createdAt'],
+            order: [['createdAt', 'DESC']]
+        });
 
         // Get user count for each tenant
         const clientsWithStats = await Promise.all(
             clients.map(async (client) => {
-                const userCount = await User.countDocuments({ tenant: client._id });
-                const reviewCount = await Review.countDocuments({ tenant: client._id });
+                const userCount = await User.count({ where: { tenantId: client.id } });
+                const reviewCount = await Review.count({ where: { tenantId: client.id } });
 
                 return {
-                    ...client.toObject(),
+                    ...client.toJSON(),
                     userCount,
                     reviewCount,
                 };
@@ -59,7 +61,7 @@ const toggleClientStatus = async (req, res) => {
     try {
         const { id } = req.params;
 
-        const client = await Tenant.findById(id);
+        const client = await Tenant.findByPk(id);
 
         if (!client) {
             return res.status(404).json({
@@ -77,7 +79,7 @@ const toggleClientStatus = async (req, res) => {
             success: true,
             message: `Client ${client.isActive ? 'enabled' : 'disabled'} successfully`,
             data: {
-                clientId: client._id,
+                clientId: client.id,
                 slug: client.slug,
                 isActive: client.isActive,
             }
@@ -101,19 +103,22 @@ const toggleClientStatus = async (req, res) => {
 const getDashboardStats = async (req, res) => {
     try {
         // Get counts
-        const totalClients = await Tenant.countDocuments();
-        const activeClients = await Tenant.countDocuments({ isActive: true });
-        const totalUsers = await User.countDocuments();
-        const totalReviews = await Review.countDocuments();
-        const pendingReviews = await Review.countDocuments({ approval_status: 'pending' });
-        const repliedReviews = await Review.countDocuments({ has_reply: true });
+        const totalClients = await Tenant.count();
+        const activeClients = await Tenant.count({ where: { isActive: true } });
+        const totalUsers = await User.count();
+        const totalReviews = await Review.count();
+        const pendingReviews = await Review.count({ where: { approval_status: 'pending' } });
+        const repliedReviews = await Review.count({ where: { has_reply: true } });
 
         // Get recent reviews
-        const recentReviews = await Review.find()
-            .populate('tenant', 'businessName slug')
-            .populate('location', 'name')
-            .sort({ review_created_at: -1 })
-            .limit(10);
+        const recentReviews = await Review.findAll({
+            include: [
+                { model: Tenant, as: 'tenant', attributes: ['businessName', 'slug'] },
+                { model: Location, as: 'location', attributes: ['name'] }
+            ],
+            order: [['review_created_at', 'DESC']],
+            limit: 10
+        });
 
         res.json({
             success: true,

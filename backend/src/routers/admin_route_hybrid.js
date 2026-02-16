@@ -12,7 +12,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 
 // Apply authentication and ADMIN authorization to all routes
 router.use(authenticate);
-router.use(authorize(['ADMIN']));
+router.use(authorize(['ADMIN', 'SUPER_ADMIN']));
 
 /**
  * Get admin dashboard data

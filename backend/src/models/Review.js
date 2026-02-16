@@ -1,127 +1,126 @@
-const mongoose = require('mongoose');
+const { DataTypes } = require('sequelize');
+const { sequelize } = require('../config/database');
+const Tenant = require('./Tenant');
+const Location = require('./Location');
+const User = require('./User');
 
-/**
- * Review Schema
- * Represents a Google review with AI-generated reply and approval workflow
- */
-
-const reviewSchema = new mongoose.Schema({
-    tenant: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Tenant',
-        required: true,
-        index: true,
+const Review = sequelize.define('Review', {
+    id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true
     },
-    location: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Location',
-        required: true,
-        index: true,
+    tenantId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        references: {
+            model: Tenant,
+            key: 'id'
+        }
+    },
+    locationId: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        references: {
+            model: Location,
+            key: 'id'
+        }
     },
     // Unique Review Key (matches ReviewKey in Google Sheets)
     review_key: {
-        type: String,
+        type: DataTypes.STRING,
         unique: true,
-        sparse: true,
-        index: true,
     },
     // Google Review Details
     google_review_id: {
-        type: String,
-        required: true,
+        type: DataTypes.STRING,
+        allowNull: false,
         unique: true,
     },
     reviewer_name: {
-        type: String,
-        required: true,
+        type: DataTypes.STRING,
+        allowNull: false,
     },
     rating: {
-        type: Number,
-        required: true,
-        min: 1,
-        max: 5,
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        validate: {
+            min: 1,
+            max: 5
+        }
     },
     review_text: {
-        type: String,
-        default: '',
+        type: DataTypes.TEXT,
+        defaultValue: '',
     },
     sentiment: {
-        type: String,
-        enum: ['Positive', 'Negative', 'Neutral', 'Mixed'],
-        default: 'Neutral',
+        type: DataTypes.ENUM('Positive', 'Negative', 'Neutral', 'Mixed'),
+        defaultValue: 'Neutral',
     },
     review_created_at: {
-        type: Date,
-        required: true,
+        type: DataTypes.DATE,
+        allowNull: false,
     },
     has_reply: {
-        type: Boolean,
-        default: false,
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
     },
     // AI Reply Generation
     ai_generated_reply: {
-        type: String,
-        default: null,
+        type: DataTypes.TEXT,
     },
     ai_reply_generated_at: {
-        type: Date,
-        default: null,
+        type: DataTypes.DATE,
     },
     // Manual Approval & Editing
     edited_reply: {
-        type: String,
-        default: null,
+        type: DataTypes.TEXT,
     },
     final_caption: {
-        type: String,
-        default: null,
+        type: DataTypes.TEXT,
     },
     approved_by: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
-        default: null,
+        type: DataTypes.UUID,
+        references: {
+            model: User,
+            key: 'id'
+        },
+        allowNull: true
     },
     approved_at: {
-        type: Date,
-        default: null,
+        type: DataTypes.DATE,
     },
     approval_status: {
-        type: String,
-        enum: ['pending', 'approved', 'rejected', 'posted'],
-        default: 'pending',
+        type: DataTypes.ENUM('pending', 'approved', 'rejected', 'posted'),
+        defaultValue: 'pending',
     },
     // Google Posting
     posted_to_google: {
-        type: Boolean,
-        default: false,
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
     },
     posted_at: {
-        type: Date,
-        default: null,
+        type: DataTypes.DATE,
     },
     google_reply_id: {
-        type: String,
-        default: null,
-    },
-    // Metadata
-    createdAt: {
-        type: Date,
-        default: Date.now,
-    },
-    updatedAt: {
-        type: Date,
-        default: Date.now,
+        type: DataTypes.STRING,
     },
 }, {
     timestamps: true,
+    indexes: [
+        { fields: ['tenantId', 'has_reply'] },
+        { fields: ['tenantId', 'rating'] },
+        { fields: ['tenantId', 'approval_status'] }
+    ]
 });
 
-// Indexes for efficient queries
-reviewSchema.index({ tenant: 1, has_reply: 1 });
-reviewSchema.index({ tenant: 1, rating: 1 });
-reviewSchema.index({ tenant: 1, approval_status: 1 });
-reviewSchema.index({ google_review_id: 1 });
+// Associations
+Review.belongsTo(Tenant, { foreignKey: 'tenantId', as: 'tenant' });
+Review.belongsTo(Location, { foreignKey: 'locationId', as: 'location' });
+Review.belongsTo(User, { foreignKey: 'approved_by', as: 'approver' });
 
-const Review = mongoose.model('Review', reviewSchema);
+// Associations for potential eager loading from parents
+Tenant.hasMany(Review, { foreignKey: 'tenantId' });
+Location.hasMany(Review, { foreignKey: 'locationId' });
 
 module.exports = Review;

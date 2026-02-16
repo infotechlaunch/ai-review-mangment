@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import './Login.css';
 
 const Login = () => {
@@ -12,6 +12,65 @@ const Login = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    // Check for Google Login params
+    const params = new URLSearchParams(location.search);
+    const googleAuth = params.get('google_auth');
+    const dataStr = params.get('data');
+
+    if (googleAuth === 'success' && dataStr) {
+      try {
+        const data = JSON.parse(decodeURIComponent(dataStr));
+        
+        // Store JWT token and user info in localStorage
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('userRole', data.role);
+        localStorage.setItem('userEmail', data.email);
+        localStorage.setItem('userName', data.userName);
+        
+        if (data.tenantId) {
+          localStorage.setItem('tenantId', data.tenantId);
+          localStorage.setItem('tenantSlug', data.tenantSlug);
+          localStorage.setItem('businessName', data.businessName);
+        }
+
+        console.log('Google Login successful');
+        
+        // Navigate based on role
+        if (data.role === 'SUPER_ADMIN') {
+          navigate('/admin/dashboard');
+        } else if (data.role === 'ADMIN') {
+          navigate('/admin');
+        } else {
+          // Check if user has already completed onboarding (connected Google Business)
+          if (data.isOnboarded) {
+             navigate('/');
+          } else {
+             navigate('/onboarding');
+          }
+        }
+      } catch (e) {
+        console.error('Error parsing Google login data', e);
+        setError('Google login failed. Invalid data received.');
+      }
+    } else if (googleAuth === 'signup' && dataStr) {
+      // Pre-fill sign up form
+      try {
+        const data = JSON.parse(decodeURIComponent(dataStr));
+        setFirstName(data.firstName || '');
+        setLastName(data.lastName || '');
+        setEmail(data.email || '');
+        setIsSignUp(true);
+        setError('Please complete your registration details.');
+      } catch (e) {
+        console.error('Error parsing signup data', e);
+      }
+    } else if (params.get('error')) {
+      setError(decodeURIComponent(params.get('error')));
+    }
+  }, [location, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -88,13 +147,20 @@ const Login = () => {
             localStorage.setItem('businessName', data.tenant.businessName);
           }
 
-          // Check Google connection status before navigating
+          // Check role and redirect accordingly
           console.log('Login successful:', data.role);
-          if (data.role === 'ADMIN') {
+          if (data.role === 'SUPER_ADMIN') {
+            // Redirect super admin to admin panel
+            navigate('/admin/dashboard');
+          } else if (data.role === 'ADMIN') {
             navigate('/admin');
           } else {
-            // Navigate directly to dashboard
-            navigate('/');
+             // Check if user has already completed onboarding
+             if (data.isOnboarded) {
+                navigate('/');
+             } else {
+                navigate('/onboarding');
+             }
           }
         } else {
           setError(data.message || 'Login failed. Please check your credentials.');
@@ -111,7 +177,7 @@ const Login = () => {
   const handleOAuthLogin = (provider) => {
     // Redirect to Google OAuth
     if (provider === 'Google') {
-      window.location.href = 'http://localhost:4000/api/google-oauth/auth';
+      window.location.href = 'http://localhost:4000/api/auth/google';
     } else {
       console.log(`${provider} login not yet implemented`);
       setError(`${provider} login is not yet available`);

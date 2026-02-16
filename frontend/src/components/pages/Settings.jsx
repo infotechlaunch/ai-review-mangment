@@ -1,10 +1,44 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useGoogleConnection } from '../../hooks/useGoogleConnection'
 import ConnectionStatusBanner from '../common/ConnectionStatusBanner'
+import './common.css'
+
+// CRITICAL: Cooldown persistence key
+const COOLDOWN_STORAGE_KEY = 'google_api_cooldown_until';
+const VERIFIED_SESSION_KEY = 'google_verified_this_session';
 
 export default function Settings() {
     const [activeTab, setActiveTab] = useState('connections')
     const { isConnected, checkConnection } = useGoogleConnection()
+    
+    // CRITICAL: Prevent multiple verification calls - use both ref AND session storage
+    const hasVerifiedRef = useRef(false)
+    
+    // Initialize cooldown from localStorage (persists across refreshes)
+    const [quotaExceeded, setQuotaExceeded] = useState(() => {
+        const stored = localStorage.getItem(COOLDOWN_STORAGE_KEY);
+        if (stored) {
+            const cooldownUntil = parseInt(stored, 10);
+            return Date.now() < cooldownUntil;
+        }
+        return false;
+    });
+    
+    const [cooldownSeconds, setCooldownSeconds] = useState(() => {
+        const stored = localStorage.getItem(COOLDOWN_STORAGE_KEY);
+        if (stored) {
+            const cooldownUntil = parseInt(stored, 10);
+            const remaining = Math.ceil((cooldownUntil - Date.now()) / 1000);
+            return remaining > 0 ? remaining : 0;
+        }
+        return 0;
+    });
+    
+    // State for No Business Account Popup
+    const [showNoBusinessAccountPopup, setShowNoBusinessAccountPopup] = useState(false)
+    const [businessAccountMessage, setBusinessAccountMessage] = useState('')
+    const [isVerifyingAccount, setIsVerifyingAccount] = useState(false)
+    const [popupType, setPopupType] = useState('no-business-account') // 'no-business-account', 'quota-error', 'error'
     
     // State for Auto-Approval Settings
     const [autoApproval, setAutoApproval] = useState({
@@ -42,6 +76,201 @@ export default function Settings() {
         { id: 'automation', label: 'Automation', icon: '🤖' },
         { id: 'notifications', label: 'Notifications', icon: '🔔' }
     ]
+
+    // Sync locations after verifying business account (DEFINED FIRST - used by verifyGoogleBusinessAccount)
+    const syncLocations = useCallback(async () => {
+        // CRITICAL: Check cooldown before making the call
+        if (quotaExceeded || cooldownSeconds > 0) {
+            console.log('⛔ Quota cooldown active - skipping sync call');
+            return;
+        }
+        
+        try {
+            const token = localStorage.getItem('token');
+            const response = await fetch('http://localhost:4000/api/google-oauth/sync-locations', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+
+            const data = await response.json();
+            
+            // CRITICAL: Handle 429 quota exceeded
+            if (response.status === 429) {
+                console.error('❌ Sync quota exceeded (429) - activating cooldown timer');
+                setQuotaExceeded(true);
+                const cooldownTime = data.retryAfter || 600;
+                setCooldownSeconds(cooldownTime);
+                
+                // Persist cooldown to localStorage
+                const cooldownUntil = Date.now() + (cooldownTime * 1000);
+                localStorage.setItem(COOLDOWN_STORAGE_KEY, cooldownUntil.toString());
+                
+                setBusinessAccountMessage(data.message || 'Google API quota exceeded during sync. Please try again later.');
+                setPopupType('quota-error');
+                setShowNoBusinessAccountPopup(true);
+                return;
+            }
+            
+            if (data.success) {
+                alert('Google Business Profile connected and locations synced successfully!');
+                checkConnection();
+            } else if (data.error === 'QUOTA_EXCEEDED') {
+                // Handle quota error from response body
+                setQuotaExceeded(true);
+                const cooldownTime = data.retryAfter || 600;
+                setCooldownSeconds(cooldownTime);
+                const cooldownUntil = Date.now() + (cooldownTime * 1000);
+                localStorage.setItem(COOLDOWN_STORAGE_KEY, cooldownUntil.toString());
+                
+                setBusinessAccountMessage(data.message || 'Google API quota exceeded. Please try again later.');
+                setPopupType('quota-error');
+                setShowNoBusinessAccountPopup(true);
+            }
+        } catch (error) {
+            console.error('Sync locations error:', error);
+        }
+    }, [checkConnection, quotaExceeded, cooldownSeconds]);
+
+    // Verify if user has a Google Business account after connection
+    const verifyGoogleBusinessAccount = useCallback(async () => {
+        // CRITICAL: If quota is exceeded or cooldown active, don't call
+        if (quotaExceeded || cooldownSeconds > 0) {
+            console.log('⛔ Quota cooldown active - skipping verification call');
+            const minutes = Math.ceil(cooldownSeconds / 60);
+            setBusinessAccountMessage(`Google API quota cooldown active. Please retry in ${minutes} minute(s).`);
+            setPopupType('quota-error');
+            setShowNoBusinessAccountPopup(true);
+            return;
+        }
+
+        try {
+            setIsVerifyingAccount(true);
+            const token = localStorage.getItem('token');
+            const response = await fetch('http://localhost:4000/api/google-oauth/verify-business-account', {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+
+            const data = await response.json();
+
+            // CRITICAL: Handle 429 quota exceeded
+            if (response.status === 429) {
+                console.error('❌ Quota exceeded (429) - activating cooldown timer');
+                setQuotaExceeded(true);
+                
+                // Set cooldown timer from backend response (default 10 minutes)
+                const cooldownTime = data.retryAfter || 600; // seconds
+                setCooldownSeconds(cooldownTime);
+                
+                // CRITICAL: Persist cooldown to localStorage
+                const cooldownUntil = Date.now() + (cooldownTime * 1000);
+                localStorage.setItem(COOLDOWN_STORAGE_KEY, cooldownUntil.toString());
+                console.log(`💾 Cooldown persisted to localStorage until: ${new Date(cooldownUntil).toISOString()}`);
+                
+                setBusinessAccountMessage(data.message || 'Google API quota exceeded. Please try again later.');
+                setPopupType('quota-error');
+                setShowNoBusinessAccountPopup(true);
+                return;
+            }
+
+            if (data.success) {
+                if (!data.hasBusinessAccount) {
+                    // User doesn't have a Google Business account
+                    setBusinessAccountMessage(data.message || "You don't have a Google Business account. Please create a Google Business Profile first to use this feature.");
+                    setPopupType('no-business-account');
+                    setShowNoBusinessAccountPopup(true);
+                } else {
+                    // User has a business account, sync locations
+                    await syncLocations();
+                }
+            } else {
+                // Check if it's a quota error
+                const isQuotaError = data.message?.toLowerCase().includes('quota') || 
+                                     data.message?.toLowerCase().includes('rate limit') ||
+                                     data.message?.toLowerCase().includes('cooldown') ||
+                                     data.error === 'QUOTA_EXCEEDED';
+                
+                if (isQuotaError) {
+                    setQuotaExceeded(true);
+                    const cooldownTime = data.retryAfter || 600;
+                    setCooldownSeconds(cooldownTime);
+                    
+                    // CRITICAL: Persist cooldown to localStorage
+                    const cooldownUntil = Date.now() + (cooldownTime * 1000);
+                    localStorage.setItem(COOLDOWN_STORAGE_KEY, cooldownUntil.toString());
+                    
+                    setBusinessAccountMessage(data.message || 'Google API quota exceeded. Please try again later.');
+                    setPopupType('quota-error');
+                } else {
+                    setBusinessAccountMessage(data.message || 'Failed to verify Google Business account.');
+                    setPopupType('error');
+                }
+                setShowNoBusinessAccountPopup(true);
+            }
+        } catch (error) {
+            console.error('Verify business account error:', error);
+            setBusinessAccountMessage('Failed to verify your Google Business account. Please try again.');
+            setPopupType('error');
+            setShowNoBusinessAccountPopup(true);
+        } finally {
+            setIsVerifyingAccount(false);
+        }
+    }, [quotaExceeded, cooldownSeconds, syncLocations]); // Dependencies
+
+    // ✅ CRITICAL FIX: Clean URL FIRST, then check if we should verify
+    // NO automatic Google API calls - user must click button
+    useEffect(() => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const connected = urlParams.get('connected');
+        
+        // ALWAYS clean the URL immediately to prevent re-triggers
+        if (connected) {
+            console.log('🧹 Cleaning OAuth callback URL params...');
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+        
+        // Check if already verified this session (prevents loops)
+        const alreadyVerifiedThisSession = sessionStorage.getItem(VERIFIED_SESSION_KEY);
+        
+        // ONLY show a notification that OAuth succeeded, but DON'T auto-call verify
+        // User must click "Verify & Sync" button manually
+        if (connected === 'true' && !alreadyVerifiedThisSession) {
+            console.log('✅ OAuth callback detected - user should click Verify & Sync button');
+            // Mark as seen so we don't show this message again
+            sessionStorage.setItem(VERIFIED_SESSION_KEY, 'true');
+            // DON'T call verifyGoogleBusinessAccount() automatically!
+            // Instead, show a helpful message
+            setBusinessAccountMessage('Google account connected! Click "Verify & Sync" to complete setup.');
+            setPopupType('no-business-account');
+            setShowNoBusinessAccountPopup(true);
+        }
+    }, []); // ✅ Run ONCE on mount, NOT on isConnected changes
+
+    // Cooldown timer countdown with localStorage persistence
+    useEffect(() => {
+        if (cooldownSeconds > 0) {
+            const timer = setInterval(() => {
+                setCooldownSeconds(prev => {
+                    const next = prev - 1;
+                    if (next <= 0) {
+                        setQuotaExceeded(false);
+                        localStorage.removeItem(COOLDOWN_STORAGE_KEY);
+                        console.log('✅ Cooldown expired - API calls enabled');
+                        return 0;
+                    }
+                    return next;
+                });
+            }, 1000); // Update every second
+            
+            return () => clearInterval(timer);
+        }
+    }, [cooldownSeconds]);
 
     const handleConnectGoogle = async () => {
         try {
@@ -105,6 +334,82 @@ export default function Settings() {
         const randomReply = newReplies[Math.floor(Math.random() * newReplies.length)]
         setAiReply({ ...aiReply, preview: randomReply })
     }
+
+    // Load Settings
+    useEffect(() => {
+        const fetchSettings = async () => {
+            try {
+                const token = localStorage.getItem('token');
+                const response = await fetch('http://localhost:4000/api/client/settings', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                const data = await response.json();
+                if (data.success) {
+                    const s = data.data;
+                    if (s.autoApproval) setAutoApproval(s.autoApproval);
+                    if (s.tone) {
+                        setToneSettings({
+                            toneStyle: s.tone.style,
+                            toneKeywords: s.tone.keywords,
+                            maxReplyLength: s.tone.maxLength
+                        });
+                    }
+                    if (s.automation) {
+                        setReviewRequest({
+                            enabled: s.automation.enabled,
+                            channels: s.automation.channels,
+                            daysAfterVisit: s.automation.daysAfterVisit,
+                            monthlyLimitPerCustomer: s.automation.monthlyLimit
+                        });
+                    }
+                }
+            } catch (error) {
+                console.error('Error fetching settings:', error);
+            }
+        };
+        fetchSettings();
+    }, []);
+
+    const handleSaveSettings = async () => {
+        try {
+            const token = localStorage.getItem('token');
+            const updates = {
+                autoApproval: autoApproval,
+                tone: {
+                    style: toneSettings.toneStyle,
+                    keywords: toneSettings.toneKeywords,
+                    maxLength: toneSettings.maxReplyLength
+                },
+                automation: {
+                    enabled: reviewRequest.enabled,
+                    channels: reviewRequest.channels,
+                    daysAfterVisit: reviewRequest.daysAfterVisit,
+                    monthlyLimit: reviewRequest.monthlyLimitPerCustomer
+                }
+            };
+
+            const response = await fetch('http://localhost:4000/api/client/settings', {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify(updates)
+            });
+
+            const data = await response.json();
+            if (data.success) {
+                alert('Settings saved successfully!');
+            } else {
+                alert('Failed to save settings');
+            }
+        } catch (error) {
+            console.error('Error saving settings:', error);
+            alert('Error saving settings');
+        }
+    };
 
     const handleToggleChannel = (channel) => {
         setReviewRequest({
@@ -196,21 +501,50 @@ export default function Settings() {
                                             </p>
                                         </div>
                                         {isConnected ? (
-                                            <button
-                                                onClick={handleDisconnectGoogle}
-                                                style={{
-                                                    padding: '10px 20px',
-                                                    backgroundColor: '#ef4444',
-                                                    color: 'white',
-                                                    border: 'none',
-                                                    borderRadius: '6px',
-                                                    fontSize: '14px',
-                                                    fontWeight: '500',
-                                                    cursor: 'pointer'
-                                                }}
-                                            >
-                                                Disconnect
-                                            </button>
+                                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                                <button
+                                                    onClick={verifyGoogleBusinessAccount}
+                                                    disabled={isVerifyingAccount || cooldownSeconds > 0}
+                                                    style={{
+                                                        padding: '10px 20px',
+                                                        backgroundColor: cooldownSeconds > 0 ? '#94a3b8' : '#10b981',
+                                                        color: 'white',
+                                                        border: 'none',
+                                                        borderRadius: '6px',
+                                                        fontSize: '14px',
+                                                        fontWeight: '500',
+                                                        cursor: (isVerifyingAccount || cooldownSeconds > 0) ? 'not-allowed' : 'pointer',
+                                                        opacity: (isVerifyingAccount || cooldownSeconds > 0) ? 0.7 : 1,
+                                                        minWidth: '140px'
+                                                    }}
+                                                >
+                                                    {isVerifyingAccount 
+                                                        ? 'Verifying...' 
+                                                        : cooldownSeconds > 0 
+                                                        ? `Retry in ${Math.ceil(cooldownSeconds / 60)}m` 
+                                                        : 'Verify & Sync'}
+                                                </button>
+                                                {cooldownSeconds > 0 && (
+                                                    <span style={{ fontSize: '13px', color: '#f59e0b', fontWeight: '500' }}>
+                                                        ⏰ Quota cooldown active
+                                                    </span>
+                                                )}
+                                                <button
+                                                    onClick={handleDisconnectGoogle}
+                                                    style={{
+                                                        padding: '10px 20px',
+                                                        backgroundColor: '#ef4444',
+                                                        color: 'white',
+                                                        border: 'none',
+                                                        borderRadius: '6px',
+                                                        fontSize: '14px',
+                                                        fontWeight: '500',
+                                                        cursor: 'pointer'
+                                                    }}
+                                                >
+                                                    Disconnect
+                                                </button>
+                                            </div>
                                         ) : (
                                             <button
                                                 onClick={handleConnectGoogle}
@@ -585,6 +919,23 @@ export default function Settings() {
                                             </div>
                                         </div>
                                     </div>
+                                    <button
+                                        onClick={handleSaveSettings}
+                                        style={{
+                                            width: '100%',
+                                            padding: '12px',
+                                            backgroundColor: 'var(--primary-color)',
+                                            color: 'white',
+                                            border: 'none',
+                                            borderRadius: '6px',
+                                            fontSize: '14px',
+                                            fontWeight: '600',
+                                            cursor: 'pointer',
+                                            marginTop: '16px'
+                                        }}
+                                    >
+                                        Save Auto-Approval Settings
+                                    </button>
                                 </div>
                             </div>
 
@@ -695,6 +1046,7 @@ export default function Settings() {
                                         </div>
 
                                         <button
+                                            onClick={handleSaveSettings}
                                             style={{
                                                 width: '100%',
                                                 padding: '12px',
@@ -798,26 +1150,17 @@ export default function Settings() {
                                                             key={channel}
                                                             onClick={() => handleToggleChannel(channel)}
                                                             style={{
-                                                                padding: '12px 24px',
-                                                                backgroundColor: reviewRequest.channels.includes(channel) 
-                                                                    ? 'var(--primary-color)' 
-                                                                    : 'var(--bg-secondary)',
-                                                                color: reviewRequest.channels.includes(channel) 
-                                                                    ? 'white' 
-                                                                    : 'var(--text-secondary)',
-                                                                border: '1px solid var(--border-color)',
-                                                                borderRadius: '8px',
-                                                                fontSize: '14px',
-                                                                fontWeight: '600',
+                                                                padding: '8px 16px',
+                                                                borderRadius: '20px',
+                                                                border: `1px solid ${reviewRequest.channels.includes(channel) ? 'var(--primary-color)' : 'var(--border-color)'}`,
+                                                                backgroundColor: reviewRequest.channels.includes(channel) ? 'var(--primary-color-light)' : 'transparent',
+                                                                color: reviewRequest.channels.includes(channel) ? 'var(--primary-color)' : 'var(--text-secondary)',
                                                                 cursor: 'pointer',
-                                                                transition: 'all 0.2s ease',
+                                                                fontSize: '14px',
                                                                 textTransform: 'capitalize'
                                                             }}
                                                         >
-                                                            {channel === 'email' && '📧'}
-                                                            {channel === 'sms' && '💬'}
-                                                            {channel === 'whatsapp' && '📱'}
-                                                            {' '}{channel}
+                                                            {channel === 'sms' ? 'SMS' : channel.charAt(0).toUpperCase() + channel.slice(1)}
                                                         </button>
                                                     ))}
                                                 </div>
@@ -832,11 +1175,11 @@ export default function Settings() {
                                                     color: 'var(--text-primary)',
                                                     marginBottom: '8px'
                                                 }}>
-                                                    Days After Visit
+                                                    Send Request After (Days)
                                                 </label>
                                                 <input
                                                     type="number"
-                                                    min="0"
+                                                    min="1"
                                                     max="30"
                                                     value={reviewRequest.daysAfterVisit}
                                                     onChange={(e) => setReviewRequest({ ...reviewRequest, daysAfterVisit: parseInt(e.target.value) })}
@@ -850,9 +1193,6 @@ export default function Settings() {
                                                         backgroundColor: 'var(--card-bg)'
                                                     }}
                                                 />
-                                                <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
-                                                    Number of days to wait before sending a review request
-                                                </div>
                                             </div>
 
                                             {/* Monthly Limit */}
@@ -882,29 +1222,27 @@ export default function Settings() {
                                                         backgroundColor: 'var(--card-bg)'
                                                     }}
                                                 />
-                                                <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
-                                                    Maximum number of review requests to send per customer each month
-                                                </div>
                                             </div>
-
-                                            <button
-                                                style={{
-                                                    width: '100%',
-                                                    padding: '14px',
-                                                    backgroundColor: 'var(--primary-color)',
-                                                    color: 'white',
-                                                    border: 'none',
-                                                    borderRadius: '6px',
-                                                    fontSize: '14px',
-                                                    fontWeight: '600',
-                                                    cursor: 'pointer',
-                                                    marginTop: '8px'
-                                                }}
-                                            >
-                                                Save Automation Settings
-                                            </button>
                                         </>
                                     )}
+
+                                    <button
+                                        onClick={handleSaveSettings}
+                                        style={{
+                                            width: '100%',
+                                            padding: '12px',
+                                            backgroundColor: 'var(--primary-color)',
+                                            color: 'white',
+                                            border: 'none',
+                                            borderRadius: '6px',
+                                            fontSize: '14px',
+                                            fontWeight: '600',
+                                            cursor: 'pointer',
+                                            marginTop: '8px'
+                                        }}
+                                    >
+                                        Save Automation Settings
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -932,6 +1270,302 @@ export default function Settings() {
                     </div>
                 )}
             </div>
+
+            {/* Error/Warning Popup Modal */}
+            {showNoBusinessAccountPopup && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 9999,
+                    backdropFilter: 'blur(4px)'
+                }}>
+                    <div style={{
+                        backgroundColor: 'var(--card-bg, #1a1a2e)',
+                        borderRadius: '16px',
+                        padding: '32px',
+                        maxWidth: '480px',
+                        width: '90%',
+                        textAlign: 'center',
+                        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+                        border: '1px solid var(--border-color, #333)',
+                        animation: 'fadeIn 0.3s ease'
+                    }}>
+                        {/* Dynamic Icon based on error type */}
+                        <div style={{
+                            width: '80px',
+                            height: '80px',
+                            borderRadius: '50%',
+                            backgroundColor: popupType === 'quota-error' ? '#f59e0b' : '#ef4444',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            margin: '0 auto 24px auto',
+                            fontSize: '40px'
+                        }}>
+                            {popupType === 'quota-error' ? '⏱️' : '⚠️'}
+                        </div>
+
+                        {/* Dynamic Title */}
+                        <h2 style={{
+                            margin: '0 0 16px 0',
+                            fontSize: '24px',
+                            fontWeight: '700',
+                            color: 'var(--text-primary, #fff)'
+                        }}>
+                            {popupType === 'quota-error' 
+                                ? 'Google API Quota Exceeded' 
+                                : popupType === 'no-business-account' 
+                                    ? 'No Google Business Account Found'
+                                    : 'Connection Error'}
+                        </h2>
+
+                        {/* Message */}
+                        <p style={{
+                            margin: '0 0 24px 0',
+                            fontSize: '15px',
+                            lineHeight: '1.6',
+                            color: 'var(--text-secondary, #a0a0a0)'
+                        }}>
+                            {businessAccountMessage}
+                        </p>
+
+                        {/* Dynamic Info Box based on error type */}
+                        {popupType === 'quota-error' ? (
+                            <div style={{
+                                padding: '16px',
+                                backgroundColor: 'var(--bg-secondary, #252542)',
+                                borderRadius: '8px',
+                                marginBottom: '24px',
+                                textAlign: 'left'
+                            }}>
+                                <p style={{ 
+                                    margin: '0 0 8px 0', 
+                                    fontSize: '14px', 
+                                    fontWeight: '600', 
+                                    color: 'var(--text-primary, #fff)' 
+                                }}>
+                                    💡 What you can do:
+                                </p>
+                                <ul style={{ 
+                                    margin: 0, 
+                                    paddingLeft: '20px', 
+                                    fontSize: '13px', 
+                                    color: 'var(--text-tertiary, #888)',
+                                    lineHeight: '1.8'
+                                }}>
+                                    <li><strong style={{color: '#10b981'}}>Skip & Sync</strong> - Try syncing your locations directly (recommended)</li>
+                                    <li><strong style={{color: '#f59e0b'}}>Try Again</strong> - Retry the verification (may fail if quota still exceeded)</li>
+                                    <li>Wait 1-2 minutes for Google's rate limit to reset</li>
+                                    <li>Your account is connected - this is just a temporary limit</li>
+                                </ul>
+                            </div>
+                        ) : popupType === 'no-business-account' ? (
+                            <div style={{
+                                padding: '16px',
+                                backgroundColor: 'var(--bg-secondary, #252542)',
+                                borderRadius: '8px',
+                                marginBottom: '24px',
+                                textAlign: 'left'
+                            }}>
+                                <p style={{ 
+                                    margin: '0 0 8px 0', 
+                                    fontSize: '14px', 
+                                    fontWeight: '600', 
+                                    color: 'var(--text-primary, #fff)' 
+                                }}>
+                                    💡 How to create a Google Business Profile:
+                                </p>
+                                <ol style={{ 
+                                    margin: 0, 
+                                    paddingLeft: '20px', 
+                                    fontSize: '13px', 
+                                    color: 'var(--text-tertiary, #888)',
+                                    lineHeight: '1.8'
+                                }}>
+                                    <li>Go to <a href="https://business.google.com" target="_blank" rel="noopener noreferrer" style={{ color: '#4285F4' }}>business.google.com</a></li>
+                                    <li>Click "Manage now" and sign in</li>
+                                    <li>Follow the steps to add your business</li>
+                                    <li>Verify your business ownership</li>
+                                    <li>Come back here and connect again</li>
+                                </ol>
+                            </div>
+                        ) : (
+                            <div style={{
+                                padding: '16px',
+                                backgroundColor: 'var(--bg-secondary, #252542)',
+                                borderRadius: '8px',
+                                marginBottom: '24px',
+                                textAlign: 'left'
+                            }}>
+                                <p style={{ 
+                                    margin: '0', 
+                                    fontSize: '13px', 
+                                    color: 'var(--text-tertiary, #888)'
+                                }}>
+                                    Please try reconnecting your Google account or contact support if the issue persists.
+                                </p>
+                            </div>
+                        )}
+
+                        {/* Buttons */}
+                        <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+                            <button
+                                onClick={() => setShowNoBusinessAccountPopup(false)}
+                                style={{
+                                    padding: '12px 24px',
+                                    backgroundColor: 'var(--bg-tertiary, #333)',
+                                    color: 'var(--text-primary, #fff)',
+                                    border: '1px solid var(--border-color, #444)',
+                                    borderRadius: '8px',
+                                    fontSize: '14px',
+                                    fontWeight: '600',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s ease'
+                                }}
+                            >
+                                Close
+                            </button>
+                            {popupType === 'quota-error' ? (
+                                <>
+                                    {/* During cooldown, only show informational text - NO buttons that call API */}
+                                    <div style={{
+                                        padding: '12px 20px',
+                                        backgroundColor: 'rgba(245, 158, 11, 0.2)',
+                                        borderRadius: '8px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '10px'
+                                    }}>
+                                        <span style={{ fontSize: '20px' }}>⏰</span>
+                                        <div>
+                                            <div style={{ 
+                                                fontSize: '14px', 
+                                                fontWeight: '600', 
+                                                color: '#f59e0b',
+                                                marginBottom: '4px'
+                                            }}>
+                                                {cooldownSeconds > 0 
+                                                    ? `Cooldown: ${Math.ceil(cooldownSeconds / 60)} minute(s) remaining`
+                                                    : 'Cooldown expired - you can try again'}
+                                            </div>
+                                            <div style={{ 
+                                                fontSize: '12px', 
+                                                color: 'var(--text-tertiary, #888)' 
+                                            }}>
+                                                {cooldownSeconds > 0 
+                                                    ? 'Please wait before making another request'
+                                                    : 'Click "Verify & Sync" button when ready'}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </>
+                            ) : popupType === 'no-business-account' ? (
+                                <a
+                                    href="https://business.google.com"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{
+                                        padding: '12px 24px',
+                                        backgroundColor: '#4285F4',
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '8px',
+                                        fontSize: '14px',
+                                        fontWeight: '600',
+                                        cursor: 'pointer',
+                                        textDecoration: 'none',
+                                        display: 'inline-block',
+                                        transition: 'all 0.2s ease'
+                                    }}
+                                >
+                                    Create Business Profile
+                                </a>
+                            ) : (
+                                <button
+                                    onClick={() => {
+                                        setShowNoBusinessAccountPopup(false);
+                                        handleConnectGoogle();
+                                    }}
+                                    style={{
+                                        padding: '12px 24px',
+                                        backgroundColor: '#4285F4',
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '8px',
+                                        fontSize: '14px',
+                                        fontWeight: '600',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s ease'
+                                    }}
+                                >
+                                    Reconnect
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Verifying Account Loading Overlay */}
+            {isVerifyingAccount && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 9999,
+                    backdropFilter: 'blur(4px)'
+                }}>
+                    <div style={{
+                        backgroundColor: 'var(--card-bg, #1a1a2e)',
+                        borderRadius: '16px',
+                        padding: '32px',
+                        textAlign: 'center',
+                        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+                        border: '1px solid var(--border-color, #333)'
+                    }}>
+                        <div style={{
+                            width: '48px',
+                            height: '48px',
+                            border: '4px solid var(--border-color, #333)',
+                            borderTopColor: '#4285F4',
+                            borderRadius: '50%',
+                            margin: '0 auto 16px auto',
+                            animation: 'spin 1s linear infinite'
+                        }}></div>
+                        <p style={{
+                            margin: 0,
+                            fontSize: '16px',
+                            color: 'var(--text-primary, #fff)'
+                        }}>
+                            Verifying Google Business Account...
+                        </p>
+                    </div>
+                </div>
+            )}
+
+            <style>{`
+                @keyframes fadeIn {
+                    from { opacity: 0; transform: scale(0.95); }
+                    to { opacity: 1; transform: scale(1); }
+                }
+                @keyframes spin {
+                    from { transform: rotate(0deg); }
+                    to { transform: rotate(360deg); }
+                }
+            `}</style>
         </div>
     )
 }

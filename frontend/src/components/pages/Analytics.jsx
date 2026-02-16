@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { apiRequest } from '../../utils/api'
+import './Analytics.css'
 
 export default function Analytics() {
     const [stats, setStats] = useState({
@@ -10,11 +11,6 @@ export default function Analytics() {
         avgRating: 0
     })
     const [loading, setLoading] = useState(true)
-    const [error, setError] = useState(null)
-
-    useEffect(() => {
-        fetchAnalyticsData()
-    }, [])
 
     const fetchAnalyticsData = async () => {
         try {
@@ -56,15 +52,33 @@ export default function Analytics() {
                     responseRate,
                     avgRating: parseFloat(avgRating)
                 })
+            } else {
+                // No reviews found - set empty stats
+                setStats({
+                    totalReviews: 0,
+                    avgSentiment: 0,
+                    responseRate: 0,
+                    avgRating: 0
+                })
             }
 
             setLoading(false)
         } catch (err) {
             console.error('Error fetching analytics data:', err)
-            setError(err.message)
+            // Set empty stats on error
+            setStats({
+                totalReviews: 0,
+                avgSentiment: 0,
+                responseRate: 0,
+                avgRating: 0
+            })
             setLoading(false)
         }
     }
+
+    useEffect(() => {
+        fetchAnalyticsData()
+    }, [])
 
     const analyticsCards = [
         {
@@ -172,6 +186,57 @@ export default function Analytics() {
                         </div>
                     ))}
                 </div>
+
+                {/* Empty State Message */}
+                {stats.totalReviews === 0 && (
+                    <div className="grid-container">
+                        <div className="grid-col-12">
+                            <div className="widget-card" style={{
+                                padding: '40px',
+                                textAlign: 'center',
+                                backgroundColor: 'var(--bg-secondary)',
+                                border: '2px dashed var(--border-color)'
+                            }}>
+                                <div style={{ fontSize: '48px', marginBottom: '16px' }}>📊</div>
+                                <h3 style={{ 
+                                    fontSize: '20px', 
+                                    fontWeight: '600', 
+                                    color: 'var(--text-primary)',
+                                    marginBottom: '8px'
+                                }}>
+                                    No Reviews Yet
+                                </h3>
+                                <p style={{ 
+                                    fontSize: '14px', 
+                                    color: 'var(--text-tertiary)',
+                                    marginBottom: '24px',
+                                    maxWidth: '500px',
+                                    margin: '0 auto 24px'
+                                }}>
+                                    Connect your Google Business Profile and sync your reviews to see analytics and insights.
+                                </p>
+                                <button 
+                                    onClick={() => window.location.href = '/settings'}
+                                    style={{
+                                        padding: '12px 24px',
+                                        backgroundColor: 'var(--primary-color)',
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '8px',
+                                        fontSize: '14px',
+                                        fontWeight: '600',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.3s ease'
+                                    }}
+                                    onMouseEnter={(e) => e.target.style.opacity = '0.9'}
+                                    onMouseLeave={(e) => e.target.style.opacity = '1'}
+                                >
+                                    Go to Settings
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* Analytics Tools */}
                 <div className="grid-container">

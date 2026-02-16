@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { apiRequest } from '../../utils/api'
+import './common.css'
 
 export default function IndustryComparison() {
     const [stats, setStats] = useState({ avgRating: 0, responseRate: 0, totalReviews: 0 })

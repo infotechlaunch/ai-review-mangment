@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { login, verifyTokenEndpoint, registerClientOwner } = require('../controller/auth_controller');
+const { login, verifyTokenEndpoint, registerClientOwner, googleLogin, googleCallback } = require('../controller/auth_controller');
 const { authenticate } = require('../middleware/auth');
 
 /**
@@ -13,6 +13,10 @@ router.post('/login', login);
 
 // Register Client Owner endpoint - creates a new CLIENT_OWNER user and their tenant
 router.post('/register/client', registerClientOwner);
+
+// Google Sign-In Routes
+router.get('/google', googleLogin);
+router.get('/google/callback', googleCallback);
 
 // Verify token endpoint - validates JWT and returns user info
 router.get('/verify', authenticate, verifyTokenEndpoint);

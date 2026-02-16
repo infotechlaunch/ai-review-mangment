@@ -1,8 +1,13 @@
 const Review = require('../models/Review');
 const Location = require('../models/Location');
 const Tenant = require('../models/Tenant');
+const User = require('../models/User');
 const { generateReply } = require('../config/openai');
 const { fetchGoogleReviews, postReplyToGoogle } = require('../services/googleBusinessService');
+const { Op } = require('sequelize');
+
+// Import quota cooldown map from google_oauth_controller
+const { quotaCooldowns } = require('./google_oauth_controller');
 
 /**
  * Review Controller
@@ -21,8 +26,24 @@ const fetchReviews = async (req, res) => {
         const userRole = req.user.role;
         const userTenant = req.user.tenant;
 
+        // 🔥 CRITICAL: Check quota cooldown FIRST (before ANY processing)
+        const cooldownKey = `quota_${userTenant}`;
+
+        if (quotaCooldowns.has(cooldownKey)) {
+            const cooldownUntil = quotaCooldowns.get(cooldownKey);
+            const remainingSeconds = Math.ceil((cooldownUntil - Date.now()) / 1000);
+            console.log(`⛔ fetchReviews blocked - quota cooldown active (${Math.ceil(remainingSeconds / 60)} min remaining)`);
+            return res.status(429).json({
+                success: false,
+                message: 'Google API quota cooldown active. Please retry later.',
+                retryAfter: remainingSeconds
+            });
+        }
+
         // Validate location
-        const location = await Location.findById(locationId).populate('tenant');
+        const location = await Location.findByPk(locationId, {
+            include: [{ model: Tenant, as: 'tenant' }]
+        });
 
         if (!location) {
             return res.status(404).json({
@@ -32,7 +53,7 @@ const fetchReviews = async (req, res) => {
         }
 
         // Ensure tenant access
-        if (userRole !== 'ADMIN' && location.tenant._id.toString() !== userTenant.toString()) {
+        if (userRole !== 'ADMIN' && location.tenant.id !== userTenant.toString()) {
             return res.status(403).json({
                 success: false,
                 message: 'Access denied'
@@ -40,30 +61,38 @@ const fetchReviews = async (req, res) => {
         }
 
         // Get tenant Google credentials
-        const tenant = await Tenant.findById(location.tenant._id);
+        // The tenant is already included in the location query
+        const tenant = location.tenant;
 
-        if (!tenant.googleBusinessProfile?.accessToken) {
+        if (!tenant.gbp_accessToken) {
             return res.status(400).json({
                 success: false,
                 message: 'Google Business Profile not connected. Please connect your account first.'
             });
         }
 
-        // Fetch reviews from Google
-        const googleReviews = await fetchGoogleReviews(
-            tenant.googleBusinessProfile.accountId,
+        // 🔥 LOGGING: Track Google API call source
+        console.log('🔥 GOOGLE API CALL FROM:', req.originalUrl, '| Tenant:', tenant.slug);
+
+        // Fetch reviews from Google (only first page to minimize API calls)
+        const googleReviewsResult = await fetchGoogleReviews(
+            tenant.gbp_accountId,
             location.googleLocationId,
-            tenant.googleBusinessProfile.accessToken
+            tenant.gbp_accessToken,
+            { maxPages: 1 } // Only fetch first page
         );
 
         let newReviewsCount = 0;
         let updatedReviewsCount = 0;
 
+        // FIX: Extract reviews array from result object
+        const googleReviews = googleReviewsResult.reviews || [];
+
         // Process each review
         for (const googleReview of googleReviews) {
             // Check if review already exists
             const existingReview = await Review.findOne({
-                google_review_id: googleReview.google_review_id
+                where: { google_review_id: googleReview.google_review_id }
             });
 
             if (existingReview) {
@@ -72,12 +101,84 @@ const fetchReviews = async (req, res) => {
                 await existingReview.save();
                 updatedReviewsCount++;
             } else {
-                // Create new review
-                await Review.create({
-                    tenant: location.tenant._id,
-                    location: location._id,
+                // Create new review object
+                // Prepare review data structure
+                const reviewData = {
+                    tenantId: location.tenant.id,
+                    locationId: location.id,
                     ...googleReview,
-                });
+                };
+
+                // --- AI Auto-Reply Logic ---
+                let aiGenerated = {};
+
+                if (!reviewData.has_reply) {
+                    try {
+                        const tenantSettings = tenant.settings || {};
+                        const toneSettings = tenantSettings.tone || {};
+                        const autoApproval = tenantSettings.autoApproval || {
+                            positive: true,
+                            neutral: false,
+                            negative: false,
+                            minRating: 4
+                        };
+
+                        // Generate AI Reply
+                        const generatedReply = await generateReply(
+                            reviewData.review_text,
+                            reviewData.rating,
+                            tenant.businessName,
+                            toneSettings
+                        );
+
+                        reviewData.ai_generated_reply = generatedReply;
+                        reviewData.ai_reply_generated_at = new Date();
+                        reviewData.edited_reply = generatedReply;
+                        reviewData.final_caption = generatedReply;
+
+                        // Determine Sentiment (Simple Rating-based)
+                        let sentiment = 'NEUTRAL';
+                        if (reviewData.rating >= 4) sentiment = 'POSITIVE';
+                        else if (reviewData.rating <= 2) sentiment = 'NEGATIVE';
+
+                        reviewData.sentiment = sentiment; // Explicitly set sentiment if not from Google
+
+                        // Check Auto-Approval Rules
+                        let shouldAutoApprove = false;
+                        if (reviewData.rating >= (autoApproval.minRating || 4)) {
+                            if (sentiment === 'POSITIVE' && autoApproval.positive) shouldAutoApprove = true;
+                            if (sentiment === 'NEUTRAL' && autoApproval.neutral) shouldAutoApprove = true;
+                            if (sentiment === 'NEGATIVE' && autoApproval.negative) shouldAutoApprove = true;
+                        }
+
+                        if (shouldAutoApprove) {
+                            // Post to Google
+                            const postResult = await postReplyToGoogle(
+                                tenant.gbp_accountId,
+                                location.googleLocationId,
+                                reviewData.google_review_id,
+                                generatedReply,
+                                tenant.gbp_accessToken
+                            );
+
+                            reviewData.approval_status = 'posted';
+                            reviewData.posted_to_google = true;
+                            reviewData.posted_at = new Date();
+                            reviewData.google_reply_id = postResult.replyId;
+                            reviewData.has_reply = true;
+                            reviewData.approved_by = userId; // Attributed to the user triggering fetch, or system
+
+                            console.log(`✓ Auto-approved and posted reply for review ${reviewData.google_review_id}`);
+                        } else {
+                            console.log(`✓ Generated draft reply for review ${reviewData.google_review_id}`);
+                        }
+                    } catch (aiError) {
+                        console.error('Error in auto-reply generation:', aiError);
+                        // Continue saving review even if AI fails
+                    }
+                }
+
+                await Review.create(reviewData);
                 newReviewsCount++;
             }
         }
@@ -116,44 +217,46 @@ const getReviews = async (req, res) => {
         const userTenant = req.user.tenant;
 
         // Build query
-        const query = {};
+        const whereClause = {};
 
         // Tenant isolation (except for admin)
         if (userRole !== 'ADMIN') {
-            query.tenant = userTenant;
+            whereClause.tenantId = userTenant;
         }
 
         // Filter by replied status
         if (replied !== undefined) {
-            query.has_reply = replied === 'true';
+            whereClause.has_reply = replied === 'true';
         }
 
         // Filter by rating
         if (rating) {
-            query.rating = parseInt(rating);
+            whereClause.rating = parseInt(rating);
         }
 
         // Execute query with pagination
-        const skip = (page - 1) * limit;
-        const reviews = await Review.find(query)
-            .populate('location', 'name slug')
-            .populate('tenant', 'businessName slug')
-            .populate('approved_by', 'email firstName lastName')
-            .sort({ review_created_at: -1 })
-            .skip(skip)
-            .limit(parseInt(limit));
-
-        const total = await Review.countDocuments(query);
+        const offset = (parseInt(page) - 1) * parseInt(limit);
+        const { count, rows: reviews } = await Review.findAndCountAll({
+            where: whereClause,
+            include: [
+                { model: Location, as: 'location', attributes: ['name', 'slug'] },
+                { model: Tenant, as: 'tenant', attributes: ['businessName', 'slug'] },
+                { model: User, as: 'approver', attributes: ['email', 'firstName', 'lastName'] }
+            ],
+            order: [['review_created_at', 'DESC']],
+            offset: offset,
+            limit: parseInt(limit)
+        });
 
         res.json({
             success: true,
             data: {
                 reviews,
                 pagination: {
-                    total,
+                    total: count,
                     page: parseInt(page),
                     limit: parseInt(limit),
-                    pages: Math.ceil(total / limit),
+                    pages: Math.ceil(count / parseInt(limit)),
                 }
             }
         });
@@ -179,10 +282,13 @@ const getReviewById = async (req, res) => {
         const userRole = req.user.role;
         const userTenant = req.user.tenant;
 
-        const review = await Review.findById(id)
-            .populate('location', 'name slug')
-            .populate('tenant', 'businessName slug')
-            .populate('approved_by', 'email firstName lastName');
+        const review = await Review.findByPk(id, {
+            include: [
+                { model: Location, as: 'location', attributes: ['name', 'slug'] },
+                { model: Tenant, as: 'tenant', attributes: ['businessName', 'slug'] },
+                { model: User, as: 'approver', attributes: ['email', 'firstName', 'lastName'] }
+            ]
+        });
 
         if (!review) {
             return res.status(404).json({
@@ -192,7 +298,7 @@ const getReviewById = async (req, res) => {
         }
 
         // Ensure tenant access
-        if (userRole !== 'ADMIN' && review.tenant._id.toString() !== userTenant.toString()) {
+        if (userRole !== 'ADMIN' && review.tenant.id.toString() !== userTenant.toString()) {
             return res.status(403).json({
                 success: false,
                 message: 'Access denied'
@@ -225,7 +331,9 @@ const generateAIReply = async (req, res) => {
         const userRole = req.user.role;
         const userTenant = req.user.tenant;
 
-        const review = await Review.findById(id).populate('tenant', 'businessName');
+        const review = await Review.findByPk(id, {
+            include: [{ model: Tenant, as: 'tenant', attributes: ['businessName', 'settings'] }]
+        });
 
         if (!review) {
             return res.status(404).json({
@@ -235,7 +343,7 @@ const generateAIReply = async (req, res) => {
         }
 
         // Ensure tenant access
-        if (userRole !== 'ADMIN' && review.tenant._id.toString() !== userTenant.toString()) {
+        if (userRole !== 'ADMIN' && review.tenant.id.toString() !== userTenant.toString()) {
             return res.status(403).json({
                 success: false,
                 message: 'Access denied'
@@ -250,11 +358,15 @@ const generateAIReply = async (req, res) => {
             });
         }
 
-        // Generate AI reply
+        // Generate AI reply with tenant settings
+        const tenantSettings = review.tenant.settings || {};
+        const toneSettings = tenantSettings.tone || {};
+
         const aiReply = await generateReply(
             review.review_text,
             review.rating,
-            review.tenant.businessName
+            review.tenant.businessName,
+            toneSettings
         );
 
         // Update review with AI-generated reply
@@ -264,13 +376,13 @@ const generateAIReply = async (req, res) => {
         review.final_caption = aiReply; // Set as final caption (can be approved)
         await review.save();
 
-        console.log(`✓ Generated AI reply for review ${review._id}`);
+        console.log(`✓ Generated AI reply for review ${review.id}`);
 
         res.json({
             success: true,
             message: 'AI reply generated successfully',
             data: {
-                reviewId: review._id,
+                reviewId: review.id,
                 aiReply,
                 generatedAt: review.ai_reply_generated_at,
             }
@@ -299,9 +411,12 @@ const approveAndPostReply = async (req, res) => {
         const userRole = req.user.role;
         const userTenant = req.user.tenant;
 
-        const review = await Review.findById(id)
-            .populate('tenant')
-            .populate('location');
+        const review = await Review.findByPk(id, {
+            include: [
+                { model: Tenant, as: 'tenant' },
+                { model: Location, as: 'location' }
+            ]
+        });
 
         if (!review) {
             return res.status(404).json({
@@ -311,7 +426,7 @@ const approveAndPostReply = async (req, res) => {
         }
 
         // Ensure tenant access
-        if (userRole !== 'ADMIN' && review.tenant._id.toString() !== userTenant.toString()) {
+        if (userRole !== 'ADMIN' && review.tenant.id.toString() !== userTenant.toString()) {
             return res.status(403).json({
                 success: false,
                 message: 'Access denied'
@@ -338,11 +453,11 @@ const approveAndPostReply = async (req, res) => {
 
         // Post reply to Google
         const postResult = await postReplyToGoogle(
-            review.tenant.googleBusinessProfile.accountId,
+            review.tenant.gbp_accountId,
             review.location.googleLocationId,
             review.google_review_id,
             replyToPost,
-            review.tenant.googleBusinessProfile.accessToken
+            review.tenant.gbp_accessToken
         );
 
         // Update review with approval and posting info
@@ -357,13 +472,13 @@ const approveAndPostReply = async (req, res) => {
         review.has_reply = true;
         await review.save();
 
-        console.log(`✓ Reply approved and posted to Google for review ${review._id}`);
+        console.log(`✓ Reply approved and posted to Google for review ${review.id}`);
 
         res.json({
             success: true,
             message: 'Reply approved and posted to Google successfully',
             data: {
-                reviewId: review._id,
+                reviewId: review.id,
                 finalCaption: review.final_caption,
                 editedReply: review.edited_reply,
                 approvedAt: review.approved_at,
@@ -400,7 +515,7 @@ const updateReply = async (req, res) => {
             });
         }
 
-        const review = await Review.findById(id);
+        const review = await Review.findByPk(id);
 
         if (!review) {
             return res.status(404).json({
@@ -410,7 +525,7 @@ const updateReply = async (req, res) => {
         }
 
         // Ensure tenant access
-        if (userRole !== 'ADMIN' && review.tenant.toString() !== userTenant.toString()) {
+        if (userRole !== 'ADMIN' && review.tenantId.toString() !== userTenant.toString()) {
             return res.status(403).json({
                 success: false,
                 message: 'Access denied'
@@ -430,13 +545,13 @@ const updateReply = async (req, res) => {
         review.final_caption = editedReply; // Update final caption with edited version
         await review.save();
 
-        console.log(`✓ Reply updated for review ${review._id}`);
+        console.log(`✓ Reply updated for review ${review.id}`);
 
         res.json({
             success: true,
             message: 'Reply updated successfully',
             data: {
-                reviewId: review._id,
+                reviewId: review.id,
                 editedReply: review.edited_reply,
                 finalCaption: review.final_caption,
             }

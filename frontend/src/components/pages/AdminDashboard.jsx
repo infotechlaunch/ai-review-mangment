@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './AdminDashboard.css';
+import './common.css';
 
 const AdminDashboard = () => {
   const [sheetData, setSheetData] = useState([]);
@@ -141,7 +142,7 @@ const AdminDashboard = () => {
     <div className="admin-dashboard">
       <div className="admin-header">
         <div className="header-left">
-          <h1>Admin Dashboard</h1>
+          <h1>Admin Dashboard kuma</h1>
           <p>Viewing client data from backend</p>
         </div>
         <div className="header-actions">

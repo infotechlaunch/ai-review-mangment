@@ -1,0 +1,324 @@
+/* Skeleton Loader Styles */
+
+.skeleton-container {
+    min-height: 100vh;
+    background-color: var(--bg-secondary);
+    padding: 0;
+}
+
+.skeleton-header {
+    background-color: var(--bg-primary);
+    border-bottom: 1px solid var(--border-color);
+    padding: 32px 48px 24px;
+}
+
+.skeleton-title {
+    width: 200px;
+    height: 32px;
+    background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--border-color) 50%, var(--bg-tertiary) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 6px;
+    margin-bottom: 12px;
+}
+
+.skeleton-subtitle {
+    width: 300px;
+    height: 16px;
+    background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--border-color) 50%, var(--bg-tertiary) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 4px;
+}
+
+.skeleton-content {
+    padding: 48px;
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+/* Stats Grid */
+.skeleton-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 24px;
+    margin-bottom: 32px;
+}
+
+.skeleton-card {
+    background-color: var(--card-bg);
+    border-radius: 8px;
+    padding: 24px;
+    box-shadow: 0 1px 3px var(--card-shadow);
+}
+
+.skeleton-card-large {
+    grid-column: span 2;
+}
+
+.skeleton-card-tall {
+    min-height: 300px;
+}
+
+.skeleton-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+/* Text Skeletons */
+.skeleton-text-xs {
+    width: 60%;
+    height: 12px;
+    background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--border-color) 50%, var(--bg-tertiary) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 4px;
+    margin-top: 8px;
+}
+
+.skeleton-text-sm {
+    width: 80%;
+    height: 14px;
+    background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--border-color) 50%, var(--bg-tertiary) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 4px;
+}
+
+.skeleton-text-md {
+    width: 140px;
+    height: 18px;
+    background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--border-color) 50%, var(--bg-tertiary) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 4px;
+    margin-bottom: 16px;
+}
+
+.skeleton-text-xl {
+    width: 100px;
+    height: 36px;
+    background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--border-color) 50%, var(--bg-tertiary) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 6px;
+    margin: 12px 0;
+}
+
+/* Icons */
+.skeleton-icon {
+    width: 32px;
+    height: 32px;
+    background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--border-color) 50%, var(--bg-tertiary) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 8px;
+}
+
+.skeleton-icon-lg {
+    width: 48px;
+    height: 48px;
+    background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--border-color) 50%, var(--bg-tertiary) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 12px;
+    margin-bottom: 16px;
+}
+
+.skeleton-avatar {
+    width: 40px;
+    height: 40px;
+    background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--border-color) 50%, var(--bg-tertiary) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 50%;
+}
+
+/* Charts */
+.skeleton-charts-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 24px;
+}
+
+.skeleton-chart {
+    width: 100%;
+    height: 250px;
+    background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--border-color) 50%, var(--bg-tertiary) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 8px;
+    margin-top: 20px;
+}
+
+/* Lists */
+.skeleton-list {
+    margin-top: 20px;
+}
+
+.skeleton-list-item {
+    width: 100%;
+    height: 60px;
+    background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--border-color) 50%, var(--bg-tertiary) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 6px;
+    margin-bottom: 12px;
+}
+
+/* Table */
+.skeleton-filters {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+}
+
+.skeleton-filter {
+    width: 150px;
+    height: 40px;
+    background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--border-color) 50%, var(--bg-tertiary) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 6px;
+}
+
+.skeleton-table {
+    margin-top: 20px;
+}
+
+.skeleton-table-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.skeleton-table-cell {
+    flex: 1;
+    height: 20px;
+    background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--border-color) 50%, var(--bg-tertiary) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 4px;
+}
+
+/* Forms */
+.skeleton-form-row {
+    margin-bottom: 24px;
+}
+
+.skeleton-input {
+    width: 100%;
+    height: 42px;
+    background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--border-color) 50%, var(--bg-tertiary) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 6px;
+    margin-top: 8px;
+}
+
+.skeleton-button {
+    width: 120px;
+    height: 42px;
+    background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--border-color) 50%, var(--bg-tertiary) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 6px;
+    margin-top: 24px;
+}
+
+/* Feature Grid */
+.skeleton-feature-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 24px;
+}
+
+/* Shimmer Animation */
+@keyframes shimmer {
+    0% {
+        background-position: -200% 0;
+    }
+    100% {
+        background-position: 200% 0;
+    }
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+    .skeleton-stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 16px;
+    }
+    
+    .skeleton-charts-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .skeleton-content {
+        padding: 32px;
+    }
+}
+
+@media (max-width: 768px) {
+    .skeleton-stats-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+    
+    .skeleton-feature-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .skeleton-header {
+        padding: 20px 24px 16px;
+    }
+    
+    .skeleton-content {
+        padding: 24px 16px;
+    }
+    
+    .skeleton-title {
+        width: 150px;
+        height: 24px;
+    }
+    
+    .skeleton-subtitle {
+        width: 200px;
+        height: 14px;
+    }
+}
+
+@media (max-width: 640px) {
+    .skeleton-content {
+        padding: 16px;
+        padding-bottom: 70px;
+    }
+    
+    .skeleton-filters {
+        flex-direction: column;
+    }
+    
+    .skeleton-filter {
+        width: 100%;
+    }
+    
+    .skeleton-table-row {
+        flex-direction: column;
+        align-items: flex-start;
+        padding: 12px;
+        background-color: var(--bg-tertiary);
+        border-radius: 8px;
+        margin-bottom: 8px;
+        border: none;
+    }
+    
+    .skeleton-table-cell {
+        width: 100%;
+        margin-bottom: 8px;
+    }
+}

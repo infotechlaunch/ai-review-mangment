@@ -5,17 +5,41 @@ const Review = require('../models/Review');
 const { fetchGoogleReviews } = require('../services/googleBusinessService');
 const { accountManagementLimiter, businessInfoLimiter } = require('../utils/rateLimiter');
 
-// Rate limiting and retry configuration
+// --- CONFIGURATION ---
+
+// Retry config - DO NOT retry 429, only server errors
 const RETRY_CONFIG = {
-    maxRetries: 3,
-    initialDelay: 1000, // 1 second
-    maxDelay: 60000, // 60 seconds
+    maxRetries: 2,          // Reduced retries
+    initialDelay: 5000,     // 5 seconds
+    maxDelay: 30000,        // 30 seconds
     backoffMultiplier: 2
 };
 
-// Simple in-memory cache for account data
-const accountCache = new Map();
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+// Extended cache for locations (they don't change often)
+const locationCache = new Map();
+const LOCATION_CACHE_TTL = 6 * 60 * 60 * 1000;  // 6 hours
+
+// GLOBAL  LOCK MAP (in-memory) - Prevents concurrent API calls for same tenant
+const accountFetchLocks = new Map();
+
+// QUOTA COOLDOWN MAP - Blocks API calls after 429 for 10 minutes (prod) or 30 seconds (dev)
+const quotaCooldowns = new Map();
+const QUOTA_COOLDOWN_DURATION = process.env.NODE_ENV === 'production'
+    ? 10 * 60 * 1000  // 10 minutes in production
+    : 30 * 1000;       // 30 seconds in development
+
+// SYNC LOCK MAP - Prevents concurrent review syncs for same tenant
+const activeSyncs = new Map();
+
+// Delay between API calls to prevent quota issues
+const API_CALL_DELAY = 1200; // 1.2 seconds between calls
+
+// Scopes required for Google Business Profile API
+const SCOPES = [
+    'https://www.googleapis.com/auth/business.manage',
+];
+
+// --- UTILITIES ---
 
 /**
  * Sleep utility for delays
@@ -23,61 +47,288 @@ const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
- * Retry function with exponential backoff
+ * Robust Retry function with exponential backoff
+ * CRITICAL FIX: DO NOT retry 429 errors - they make quota worse!
  */
-const retryWithBackoff = async (fn, retries = RETRY_CONFIG.maxRetries, delay = RETRY_CONFIG.initialDelay) => {
+async function retryWithBackoff(fn, retries = RETRY_CONFIG.maxRetries, delay = RETRY_CONFIG.initialDelay) {
     try {
         return await fn();
     } catch (error) {
-        // Check if it's a quota error
-        const isQuotaError = error.code === 429 ||
-            error.status === 429 ||
-            (error.message && error.message.includes('Quota exceeded'));
+        const errorCode = error.code || (error.response && error.response.status);
+        const errorMessage = error.message || (error.response && error.response.data && error.response.data.error && error.response.data.error.message) || '';
 
-        if (isQuotaError && retries > 0) {
-            console.log(`⏳ Quota exceeded. Retrying in ${delay}ms... (${retries} retries left)`);
+        // Check for 429 rate limit - STOP immediately, don't retry
+        const isRateLimitError =
+            errorCode === 429 ||
+            errorMessage.includes('Quota exceeded') ||
+            errorMessage.includes('Too Many Requests') ||
+            errorMessage.includes('quota metric') ||
+            errorMessage.includes('RESOURCE_EXHAUSTED');
+
+        if (isRateLimitError) {
+            console.error('❌ QUOTA EXCEEDED (429) - Stopping all retries');
+            console.error('   This request consumed quota. Schedule retry after 5+ minutes.');
+            const quotaError = new Error('RATE_LIMITED_RETRY_LATER');
+            quotaError.code = 'QUOTA_EXCEEDED';
+            quotaError.status = 429;
+            throw quotaError;
+        }
+
+        // Retry only network/server errors, NOT quota errors
+        const isRetriableError =
+            errorCode === 503 ||
+            errorCode === 500 ||
+            error.code === 'ECONNRESET' ||
+            error.code === 'ETIMEDOUT';
+
+        if (isRetriableError && retries > 0) {
+            console.log(`⏳ Server error. Waiting ${delay}ms before retry... (${retries} attempts left)`);
             await sleep(delay);
             const nextDelay = Math.min(delay * RETRY_CONFIG.backoffMultiplier, RETRY_CONFIG.maxDelay);
             return retryWithBackoff(fn, retries - 1, nextDelay);
         }
+
         throw error;
     }
-};
+}
 
 /**
- * Google OAuth Controller
- * Handles Google Business Profile OAuth connection flow
+ * SINGLE SOURCE OF TRUTH for Google Account ID
+ * This is the ONLY function that calls accounts.list()
+ * Uses: 1) Cooldown check, 2) DB cache, 3) In-flight lock, 4) API call (last resort)
  */
+async function getGoogleAccountId({ tenantId, authClient }) {
+    // 0️⃣ Check cooldown FIRST - if quota exceeded recently, STOP
+    const cooldownKey = `quota_${tenantId}`;
+    if (quotaCooldowns.has(cooldownKey)) {
+        const cooldownUntil = quotaCooldowns.get(cooldownKey);
+        if (Date.now() < cooldownUntil) {
+            const remainingMinutes = Math.ceil((cooldownUntil - Date.now()) / 60000);
+            console.log(`⛔ Quota cooldown active - ${remainingMinutes} min remaining`);
+            const error = new Error('RATE_LIMITED_RETRY_LATER');
+            error.remainingMinutes = remainingMinutes;
+            throw error;
+        } else {
+            // Cooldown expired, remove it
+            quotaCooldowns.delete(cooldownKey);
+        }
+    }
 
-// OAuth2 client configuration
-const getOAuth2Client = () => {
+    // 1️⃣ Check DB first - SINGLE SOURCE OF TRUTH
+    const tenant = await Tenant.findByPk(tenantId);
+    if (!tenant) {
+        throw new Error('TENANT_NOT_FOUND');
+    }
+
+    if (tenant.gbp_accountId) {
+        console.log('✅ Using stored Google Account ID from database');
+        return tenant.gbp_accountId;
+    }
+
+    // 2️⃣ If another request is already fetching → WAIT for it
+    if (accountFetchLocks.has(tenantId)) {
+        console.log('⏳ Waiting for in-flight Google account fetch...');
+        return accountFetchLocks.get(tenantId);
+    }
+
+    // 3️⃣ Create a LOCKED fetch (only one per tenant at a time)
+    const fetchPromise = (async () => {
+        console.log('⚠️ Fetching accounts from Google API (LOCKED)');
+        console.log('🔥 GOOGLE API CALL: accounts.list() | Tenant:', tenantId);
+
+        try {
+            const accountMgmt = google.mybusinessaccountmanagement({
+                version: 'v1',
+                auth: authClient,
+            });
+
+            // Add delay to prevent rapid requests
+            await sleep(API_CALL_DELAY);
+
+            const res = await accountMgmt.accounts.list();
+
+            if (!res.data.accounts?.length) {
+                throw new Error('NO_GOOGLE_ACCOUNTS_FOUND');
+            }
+
+            const accountId = res.data.accounts[0].name;
+
+            // Save to database for future use - PERMANENT CACHE
+            await Tenant.update(
+                { gbp_accountId: accountId },
+                { where: { id: tenantId } }
+            );
+
+            console.log('💾 Google Account ID cached in DB:', accountId);
+            return accountId;
+
+        } catch (err) {
+            // DO NOT retry 429 errors - SET COOLDOWN
+            if (err.code === 429 || err.response?.status === 429) {
+                const cooldownUntil = Date.now() + QUOTA_COOLDOWN_DURATION;
+                quotaCooldowns.set(cooldownKey, cooldownUntil);
+                console.error(`❌ QUOTA EXCEEDED – cooldown set for ${QUOTA_COOLDOWN_DURATION / 60000} minutes`);
+                const quotaError = new Error('RATE_LIMITED_RETRY_LATER');
+                quotaError.remainingMinutes = QUOTA_COOLDOWN_DURATION / 60000;
+                throw quotaError;
+            }
+            throw err;
+        }
+    })();
+
+    accountFetchLocks.set(tenantId, fetchPromise);
+
+    try {
+        return await fetchPromise;
+    } finally {
+        accountFetchLocks.delete(tenantId);
+    }
+}
+
+function getOAuth2Client() {
     return new google.auth.OAuth2(
         process.env.GOOGLE_CLIENT_ID,
         process.env.GOOGLE_CLIENT_SECRET,
-        process.env.GOOGLE_REDIRECT_URI || 'http://localhost:4000/api/google-oauth/callback'
+        process.env.GOOGLE_REDIRECT_URI
     );
-};
+}
 
-// Scopes required for Google Business Profile API
-const SCOPES = [
-    'https://www.googleapis.com/auth/business.manage',
-];
+/**
+ * Helper: Refresh access token if expired
+ * CRITICAL: Never refresh token during quota cooldown
+ */
+async function ensureValidToken(tenant, tenantId) {
+    const cooldownKey = `quota_${tenantId}`;
+
+    // 🚫 Never refresh token during quota cooldown
+    if (quotaCooldowns.has(cooldownKey)) {
+        throw new Error('QUOTA_COOLDOWN_ACTIVE');
+    }
+
+    const expiryDate = new Date(tenant.gbp_tokenExpiry);
+    const now = new Date();
+
+    if (now >= new Date(expiryDate.getTime() - 5 * 60 * 1000)) {
+        console.log(`🔄 Token expiring for tenant ${tenant.slug}, refreshing...`);
+        return await refreshTenantAccessToken(tenant.id);
+    }
+
+    return tenant.gbp_accessToken;
+}
+
+/**
+ * Fetch and save Google Business locations for a tenant
+ * CRITICAL FIX: Serialize API calls with delays to prevent quota exceeded
+ */
+async function fetchAndSaveLocations(tenant, oauth2Client, accountId) {
+    try {
+        const mybusiness = google.mybusinessbusinessinformation({ version: 'v1', auth: oauth2Client });
+
+        // Check cache first
+        const cacheKey = `locations_${tenant.id}`;
+        let locations = [];
+
+        if (locationCache.has(cacheKey)) {
+            const cached = locationCache.get(cacheKey);
+            if (Date.now() - cached.timestamp < LOCATION_CACHE_TTL) {
+                console.log(`✅ Using cached location data for tenant ${tenant.slug}`);
+                locations = cached.data;
+            }
+        }
+
+        // Fetch from API if not cached
+        if (locations.length === 0) {
+            console.log(`📍 Fetching locations from Google API for account: ${accountId}`); console.log('🔥 GOOGLE API CALL: accounts.locations.list() | Tenant:', tenant.slug);
+            // Add delay before API call
+            await sleep(API_CALL_DELAY);
+
+            const response = await mybusiness.accounts.locations.list({
+                parent: accountId,
+                readMask: 'name,title,storefrontAddress'
+            });
+
+            locations = response.data.locations || [];
+            console.log(`✅ Found ${locations.length} location(s)`);
+
+            // Cache the results
+            locationCache.set(cacheKey, {
+                data: locations,
+                timestamp: Date.now()
+            });
+        }
+
+        // Get existing locations from database
+        const existingLocations = await Location.findAll({
+            where: { tenantId: tenant.id },
+            attributes: ['googleLocationId']
+        });
+
+        const existingLocationIds = new Set(existingLocations.map(l => l.googleLocationId));
+
+        let savedCount = 0;
+        let skippedCount = 0;
+
+        // CRITICAL: Process locations SERIALLY with delays, NOT in parallel
+        for (const location of locations) {
+            const locationId = location.name;
+
+            if (existingLocationIds.has(locationId)) {
+                console.log(`  ⏩ Location already exists: ${location.title}`);
+                skippedCount++;
+                continue;
+            }
+
+            // Add delay between operations
+            await sleep(API_CALL_DELAY);
+
+            await Location.create({
+                tenantId: tenant.id,
+                googleLocationId: locationId,
+                locationName: location.title || 'Unnamed Location',
+                address: location.storefrontAddress ?
+                    `${location.storefrontAddress.addressLines?.[0] || ''}, ${location.storefrontAddress.locality || ''}` :
+                    null,
+                isActive: true,
+            });
+
+            console.log(`  ✅ Saved new location: ${location.title}`);
+            savedCount++;
+        }
+
+        console.log(`🎯 Location sync complete: ${savedCount} new, ${skippedCount} existing`);
+
+        return {
+            total: locations.length,
+            saved: savedCount,
+            skipped: skippedCount,
+        };
+
+    } catch (error) {
+        // Handle quota exceeded errors specially
+        if (error.code === 'QUOTA_EXCEEDED' || error.status === 429) {
+            console.error('❌ Quota exceeded while fetching locations');
+            console.error('   Location sync will be retried later via background job');
+            throw error;
+        }
+
+        console.error('Error fetching and saving locations:', error.message);
+        throw error;
+    }
+}
+
+// --- CONTROLLERS ---
 
 /**
  * Initiate Google OAuth flow
  * @route GET /api/google-oauth/connect
- * @returns {object} Authorization URL to redirect user
  */
 const initiateOAuthFlow = async (req, res) => {
     try {
-        // Support both authenticated and onboarding flow
         let tenantId;
 
         if (req.params.tenantId) {
-            // Onboarding flow - tenantId from URL parameter
             tenantId = req.params.tenantId;
         } else if (req.user) {
-            // Authenticated flow - tenantId from JWT
             tenantId = req.user.tenant || req.user.tenantId;
         }
 
@@ -88,8 +339,8 @@ const initiateOAuthFlow = async (req, res) => {
             });
         }
 
-        // Verify tenant exists
-        const tenant = await Tenant.findById(tenantId);
+        // Sequelize: findByPk
+        const tenant = await Tenant.findByPk(tenantId);
         if (!tenant) {
             return res.status(404).json({
                 success: false,
@@ -99,12 +350,11 @@ const initiateOAuthFlow = async (req, res) => {
 
         const oauth2Client = getOAuth2Client();
 
-        // Generate authorization URL
         const authUrl = oauth2Client.generateAuthUrl({
-            access_type: 'offline', // Required to get refresh token
+            access_type: 'offline',
             scope: SCOPES,
-            prompt: 'consent', // Force consent screen to get refresh token every time
-            state: tenantId.toString(), // Pass tenant ID in state for callback
+            prompt: 'consent',
+            state: tenantId.toString(),
         });
 
         res.json({
@@ -125,32 +375,23 @@ const initiateOAuthFlow = async (req, res) => {
 
 /**
  * Handle OAuth callback and store tokens
+ * FIXED: ONLY saves tokens, does NOT call Google APIs
  * @route GET /api/google-oauth/callback
- * @param {string} code - Authorization code from Google
- * @param {string} state - Tenant ID passed in state parameter
- * @returns {object} Success message
  */
 const handleOAuthCallback = async (req, res) => {
     try {
         const { code, state } = req.query;
 
-        if (!code) {
+        if (!code || !state) {
             return res.status(400).json({
                 success: false,
-                message: 'Authorization code is required'
+                message: 'Authorization code and state are required'
             });
         }
 
         const tenantId = state;
-        if (!tenantId) {
-            return res.status(400).json({
-                success: false,
-                message: 'Invalid state parameter. Tenant ID not found.'
-            });
-        }
-
-        // Verify tenant exists
-        const tenant = await Tenant.findById(tenantId);
+        // Sequelize: findByPk
+        const tenant = await Tenant.findByPk(tenantId);
         if (!tenant) {
             return res.status(404).json({
                 success: false,
@@ -159,368 +400,269 @@ const handleOAuthCallback = async (req, res) => {
         }
 
         const oauth2Client = getOAuth2Client();
-
-        // Exchange authorization code for tokens
         const { tokens } = await oauth2Client.getToken(code);
 
         if (!tokens.refresh_token) {
-            return res.status(400).json({
-                success: false,
-                message: 'Refresh token not received. Please try again with consent prompt.'
-            });
+            console.warn('⚠️ No refresh token received. User may need to re-authorize with consent.');
         }
 
-        // Set credentials to use the access token
-        oauth2Client.setCredentials(tokens);
-
-        // Check cache first to avoid unnecessary API calls
-        const cacheKey = `accounts_${tenantId}`;
-        let accountId;
-
-        const cachedData = accountCache.get(cacheKey);
-        if (cachedData && (Date.now() - cachedData.timestamp) < CACHE_TTL) {
-            console.log('✓ Using cached account data');
-            accountId = cachedData.accountId;
-        } else {
-            // Fetch Google Business accounts with retry logic
-            const mybusiness = google.mybusinessaccountmanagement({ version: 'v1', auth: oauth2Client });
-
-            const accountsResponse = await retryWithBackoff(async () => {
-                return await accountManagementLimiter.execute(async () => {
-                    return await mybusiness.accounts.list();
-                });
-            });
-
-            const accounts = accountsResponse.data.accounts || [];
-            if (accounts.length === 0) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'No Google Business accounts found for this Google account'
-                });
-            }
-
-            // Use the first account (or you can let user choose)
-            const accountName = accounts[0].name; // Format: "accounts/123456789"
-            accountId = accountName.split('/')[1];
-
-            // Cache the account data
-            accountCache.set(cacheKey, {
-                accountId,
-                timestamp: Date.now()
-            });
-            console.log('✓ Cached account data for future requests');
+        // FIXED: Update flat fields in Sequelize model
+        tenant.gbp_accessToken = tokens.access_token;
+        if (tokens.refresh_token) {
+            tenant.gbp_refreshToken = tokens.refresh_token;
         }
-
-        // Calculate token expiry
-        const tokenExpiry = new Date(Date.now() + (tokens.expiry_date || 3600 * 1000));
-
-        // Update tenant with OAuth credentials
-        tenant.googleBusinessProfile = {
-            accountId: accountId,
-            accessToken: tokens.access_token,
-            refreshToken: tokens.refresh_token,
-            tokenExpiry: tokenExpiry,
-        };
+        tenant.gbp_tokenExpiry = new Date(tokens.expiry_date || (Date.now() + 3600 * 1000));
+        // Don't set gbp_accountId to null - let it persist or be fetched later
 
         await tenant.save();
+        console.log(`✓ Google Business tokens saved for tenant: ${tenant.slug}`);
 
-        console.log(`✓ Google Business account connected for tenant: ${tenant.slug}`);
-
-        // Fetch and save locations with retry logic
-        try {
-            await fetchAndSaveLocations(tenant, oauth2Client, accountId);
-        } catch (locError) {
-            console.warn('Warning: Could not fetch locations:', locError.message);
-            // Continue even if location fetch fails
-        }
-
-        // Add delay before syncing reviews to avoid quota issues
-        console.log('⏳ Waiting before syncing reviews to avoid rate limits...');
-        await sleep(2000); // 2 second delay
-
-        // Sync reviews after connection - do this in background to avoid blocking the response
-        // We'll skip this during initial connection to reduce API calls
-        console.log('ℹ️ Skipping initial review sync to avoid quota issues. Reviews will be synced later.');
-
-        // Optional: You can uncomment this to sync reviews, but it may cause quota issues
-        /*
-        try {
-            const locations = await Location.find({ tenant: tenant._id, isActive: true });
-            for (const location of locations) {
-                try {
-                    await sleep(1000); // Delay between each location
-                    await fetchGoogleReviews(accountId, location.googleLocationId, tokens.access_token);
-                } catch (reviewError) {
-                    console.warn(`Warning: Could not fetch reviews for location ${location.name}:`, reviewError.message);
-                }
-            }
-        } catch (syncError) {
-            console.warn('Warning: Could not sync reviews:', syncError.message);
-        }
-        */
-
-        // Redirect to frontend success page
+        // FIXED: Immediately redirect, don't call any Google APIs here
         const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-        res.redirect(`${frontendUrl}/onboarding/success?connected=true`);
+        return res.redirect(`${frontendUrl}/onboarding/success?connected=true`);
 
     } catch (error) {
         console.error('OAuth callback error:', error);
         const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-        res.redirect(`${frontendUrl}/onboarding/success?connected=false&error=${encodeURIComponent(error.message)}`);
+        return res.redirect(`${frontendUrl}/onboarding/success?connected=false&error=${encodeURIComponent(error.message)}`);
     }
 };
 
 /**
- * Fetch and save Google Business locations for a tenant
- * @param {object} tenant - Tenant document
- * @param {object} oauth2Client - Configured OAuth2 client
- * @param {string} accountId - Google Business account ID
+ * NEW: Sync Google Business locations (separate from OAuth)
+ * Call this AFTER OAuth callback completes
+ * CRITICAL FIX: Uses cached account data to prevent quota issues
+ * @route POST /api/google-oauth/sync-locations
  */
-const fetchAndSaveLocations = async (tenant, oauth2Client, accountId) => {
+const syncGoogleLocations = async (req, res) => {
     try {
-        const mybusiness = google.mybusinessbusinessinformation({ version: 'v1', auth: oauth2Client });
+        const tenantId = req.user.tenant || req.user.tenantId;
 
-        // Use retry logic and rate limiting for location fetching
-        const locationsResponse = await retryWithBackoff(async () => {
-            return await businessInfoLimiter.execute(async () => {
-                return await mybusiness.accounts.locations.list({
-                    parent: `accounts/${accountId}`,
-                    readMask: 'name,title,storefrontAddress',
-                });
+        if (!tenantId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Tenant ID is required'
             });
+        }
+
+        // CRITICAL FIX: Check cooldown at ROUTE LEVEL (before any processing)
+        const cooldownKey = `quota_${tenantId}`;
+        if (quotaCooldowns.has(cooldownKey)) {
+            const cooldownUntil = quotaCooldowns.get(cooldownKey);
+            const remainingMinutes = Math.ceil((cooldownUntil - Date.now()) / 60000);
+            console.log(`⛔ Route blocked - quota cooldown active (${remainingMinutes} min remaining)`);
+            return res.status(429).json({
+                success: false,
+                message: `Google API quota cooldown active. Please retry in ${remainingMinutes} minutes.`,
+                retryAfter: 600
+            });
+        }
+
+        const tenant = await Tenant.findByPk(tenantId);
+        if (!tenant) {
+            return res.status(404).json({
+                success: false,
+                message: 'Tenant not found'
+            });
+        }
+
+        if (!tenant.gbp_refreshToken) {
+            return res.status(400).json({
+                success: false,
+                message: 'Google Business Profile not connected. Please connect first.'
+            });
+        }
+
+        // Set up OAuth client
+        const oauth2Client = getOAuth2Client();
+        const accessToken = await ensureValidToken(tenant);
+
+        oauth2Client.setCredentials({
+            access_token: accessToken,
+            refresh_token: tenant.gbp_refreshToken
         });
 
-        const locations = locationsResponse.data.locations || [];
+        // Get account ID using SINGLE source of truth
+        let accountId;
 
-        for (const googleLocation of locations) {
-            const locationId = googleLocation.name.split('/').pop();
-            const locationName = googleLocation.title || `Location ${locationId}`;
-
-            // Create slug from location name
-            const slug = locationName
-                .toLowerCase()
-                .trim()
-                .replace(/[^a-z0-9\s-]/g, '')
-                .replace(/\s+/g, '-')
-                .replace(/-+/g, '-')
-                .replace(/^-|-$/g, '');
-
-            // Check if location already exists
-            const existingLocation = await Location.findOne({
-                tenant: tenant._id,
-                googleLocationId: locationId
+        try {
+            accountId = await getGoogleAccountId({
+                tenantId,
+                authClient: oauth2Client
             });
-
-            if (!existingLocation) {
-                const location = new Location({
-                    tenant: tenant._id,
-                    slug: `${slug}-${locationId.substring(0, 6)}`, // Ensure uniqueness
-                    name: locationName,
-                    googleLocationId: locationId,
-                    googleAccountId: accountId,
-                    address: googleLocation.storefrontAddress?.addressLines?.join(', ') || '',
-                    isActive: true,
+            console.log(`✅ Account ID obtained: ${accountId}`);
+        } catch (error) {
+            // Handle quota exceeded - STOP immediately
+            if (error.message === 'RATE_LIMITED_RETRY_LATER') {
+                console.warn('⛔ Skipping Google calls – retry after 5+ minutes');
+                return res.status(429).json({
+                    success: false,
+                    message: 'Google API quota exceeded. Please try again in 5+ minutes.',
+                    error: 'QUOTA_EXCEEDED',
+                    retryAfter: 300
                 });
-
-                await location.save();
-                console.log(`✓ Location saved: ${locationName}`);
             }
+
+            if (error.message === 'NO_GOOGLE_ACCOUNTS_FOUND') {
+                return res.status(404).json({
+                    success: false,
+                    message: 'No Google Business accounts found'
+                });
+            }
+
+            throw error;
         }
 
-        console.log(`✓ Fetched ${locations.length} locations for tenant: ${tenant.slug}`);
-
-    } catch (error) {
-        console.error('Error fetching locations:', error);
-        throw error;
-    }
-};
-
-/**
- * Get Google Business connection status
- * @route GET /api/google-oauth/status
- * @returns {object} Connection status and details
- */
-const getConnectionStatus = async (req, res) => {
-    try {
-        const tenantId = req.user.tenant || req.user.tenantId;
-
-        if (!tenantId) {
-            return res.status(400).json({
-                success: false,
-                message: 'Tenant ID is required'
-            });
-        }
-
-        const tenant = await Tenant.findById(tenantId);
-        if (!tenant) {
-            return res.status(404).json({
-                success: false,
-                message: 'Tenant not found'
-            });
-        }
-
-        const isConnected = !!(
-            tenant.googleBusinessProfile?.accountId &&
-            tenant.googleBusinessProfile?.refreshToken
-        );
-
-        const response = {
-            success: true,
-            isConnected,
-        };
-
-        if (isConnected) {
-            response.accountId = tenant.googleBusinessProfile.accountId;
-            response.tokenExpiry = tenant.googleBusinessProfile.tokenExpiry;
-            response.isTokenExpired = new Date() > new Date(tenant.googleBusinessProfile.tokenExpiry);
-
-            // Get locations count
-            const locationsCount = await Location.countDocuments({
-                tenant: tenantId,
-                isActive: true
-            });
-            response.locationsCount = locationsCount;
-        }
-
-        res.json(response);
-
-    } catch (error) {
-        console.error('Get connection status error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to get connection status',
-            error: error.message
-        });
-    }
-};
-
-/**
- * Disconnect Google Business account
- * @route POST /api/google-oauth/disconnect
- * @returns {object} Success message
- */
-const disconnectGoogleAccount = async (req, res) => {
-    try {
-        const tenantId = req.user.tenant || req.user.tenantId;
-
-        if (!tenantId) {
-            return res.status(400).json({
-                success: false,
-                message: 'Tenant ID is required'
-            });
-        }
-
-        const tenant = await Tenant.findById(tenantId);
-        if (!tenant) {
-            return res.status(404).json({
-                success: false,
-                message: 'Tenant not found'
-            });
-        }
-
-        // Clear Google Business credentials
-        tenant.googleBusinessProfile = {
-            accountId: null,
-            locationId: null,
-            accessToken: null,
-            refreshToken: null,
-            tokenExpiry: null,
-        };
-
-        await tenant.save();
-
-        console.log(`✓ Google Business account disconnected for tenant: ${tenant.slug}`);
+        // Fetch and save locations (with serialization and delays)
+        console.log('📍 Starting location sync...');
+        const result = await fetchAndSaveLocations(tenant, oauth2Client, accountId);
 
         res.json({
             success: true,
-            message: 'Google Business account disconnected successfully'
+            message: 'Locations synced successfully',
+            accountId,
+            locationsFound: result.total,
+            locationsSaved: result.saved,
+            locationsSkipped: result.skipped
         });
 
     } catch (error) {
-        console.error('Disconnect error:', error);
+        console.error('❌ Sync locations error:', error);
+
+        // Handle quota exceeded errors
+        if (error.message === 'RATE_LIMITED_RETRY_LATER' || error.code === 'QUOTA_EXCEEDED' || error.status === 429) {
+            return res.status(429).json({
+                success: false,
+                message: 'Google API quota exceeded. Please try again in 5+ minutes.',
+                error: 'QUOTA_EXCEEDED',
+                retryAfter: 300
+            });
+        }
+
         res.status(500).json({
             success: false,
-            message: 'Failed to disconnect Google Business account',
+            message: 'Failed to sync locations',
             error: error.message
         });
     }
+
+
 };
 
 /**
  * Refresh access token using refresh token
- * @param {string} tenantId - Tenant ID
- * @returns {Promise<string>} New access token
+ * ✅ Modern & recommended method
  */
-const refreshTenantAccessToken = async (tenantId) => {
+async function refreshTenantAccessToken(tenantId) {
     try {
-        const tenant = await Tenant.findById(tenantId);
-        if (!tenant || !tenant.googleBusinessProfile?.refreshToken) {
+        const tenant = await Tenant.findByPk(tenantId);
+        if (!tenant || !tenant.gbp_refreshToken) {
             throw new Error('Tenant or refresh token not found');
         }
 
         const oauth2Client = getOAuth2Client();
         oauth2Client.setCredentials({
-            refresh_token: tenant.googleBusinessProfile.refreshToken
+            refresh_token: tenant.gbp_refreshToken
         });
 
-        const { credentials } = await oauth2Client.refreshAccessToken();
+        // ✅ Modern & recommended method
+        const { token } = await oauth2Client.getAccessToken();
 
-        // Update tenant with new access token
-        tenant.googleBusinessProfile.accessToken = credentials.access_token;
-        tenant.googleBusinessProfile.tokenExpiry = new Date(credentials.expiry_date);
+        if (!token) {
+            throw new Error('Failed to obtain access token');
+        }
+
+        tenant.gbp_accessToken = token;
+        tenant.gbp_tokenExpiry = new Date(Date.now() + 3600 * 1000);
         await tenant.save();
 
         console.log(`✓ Access token refreshed for tenant: ${tenant.slug}`);
-
-        return credentials.access_token;
+        return token;
 
     } catch (error) {
         console.error('Token refresh error:', error);
         throw new Error('Failed to refresh access token');
     }
-};
+}
 
 /**
  * Fetch and sync reviews for all locations of a tenant
  * @route POST /api/google-oauth/sync-reviews
- * @returns {object} Sync results
  */
 const fetchAndSyncReviews = async (req, res) => {
     try {
         const tenantId = req.user.tenant || req.user.tenantId;
 
         if (!tenantId) {
-            return res.status(400).json({
+            return res.status(400).json({ success: false, message: 'Tenant ID is required' });
+        }
+
+        // 🔒 Check if sync is already in progress for this tenant
+        if (activeSyncs.has(tenantId)) {
+            const syncStartTime = activeSyncs.get(tenantId);
+            const elapsedMinutes = Math.floor((Date.now() - syncStartTime) / 60000);
+            console.log(`⚠️ Sync already in progress for tenant ${tenantId} (started ${elapsedMinutes} min ago)`);
+            return res.status(409).json({
                 success: false,
-                message: 'Tenant ID is required'
+                message: 'Review sync is already in progress. Please wait for it to complete.',
+                syncInProgress: true
             });
         }
 
-        const tenant = await Tenant.findById(tenantId);
+        // Mark sync as active
+        activeSyncs.set(tenantId, Date.now());
+
+        let tenant = await Tenant.findByPk(tenantId);
         if (!tenant) {
-            return res.status(404).json({
-                success: false,
-                message: 'Tenant not found'
-            });
+            return res.status(404).json({ success: false, message: 'Tenant not found' });
         }
 
-        if (!tenant.googleBusinessProfile?.accessToken) {
+        if (!tenant.gbp_refreshToken) {
             return res.status(400).json({
                 success: false,
-                message: 'Google Business Profile not connected. Please connect your account first.'
+                message: 'Google Business Profile not connected.'
             });
         }
 
-        // Get all locations for this tenant
-        const locations = await Location.find({
-            tenant: tenantId,
-            isActive: true
+        // 🚫 CRITICAL: Account must be verified FIRST (don't call accounts.list here)
+        if (!tenant.gbp_accountId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Account not verified yet. Please verify your Google Business account first.',
+                action: 'VERIFY_ACCOUNT_FIRST'
+            });
+        }
+
+        let accessToken;
+        try {
+            accessToken = await ensureValidToken(tenant, tenantId);
+        } catch (tokenError) {
+            if (tokenError.message === 'QUOTA_COOLDOWN_ACTIVE') {
+                return res.status(429).json({
+                    success: false,
+                    message: 'Google API cooldown active. Please retry later.',
+                    retryAfter: 600
+                });
+            }
+            return res.status(401).json({
+                success: false,
+                message: 'Failed to refresh Google access token. Please reconnect account.',
+                error: tokenError.message
+            });
+        }
+
+        // Sequelize: findAll({ where: ... })
+        const locations = await Location.findAll({
+            where: {
+                tenantId: tenantId,
+                isActive: true
+            }
         });
 
         if (locations.length === 0) {
             return res.status(404).json({
                 success: false,
-                message: 'No locations found. Please ensure your Google Business locations are synced.'
+                message: 'No locations found. Please sync locations first.'
             });
         }
 
@@ -528,36 +670,46 @@ const fetchAndSyncReviews = async (req, res) => {
         let totalUpdatedReviews = 0;
         const locationResults = [];
 
-        // Fetch reviews for each location
+        console.log(`📊 Syncing ${locations.length} locations...`);
+
         for (const location of locations) {
+            // CRITICAL: 2-second delay between locations to prevent rate limiting
+            await sleep(2000);
+
             try {
-                const googleReviews = await fetchGoogleReviews(
-                    tenant.googleBusinessProfile.accountId,
+                // Determine accountId (might be in tenant or location)
+                const accountId = tenant.gbp_accountId || location.googleAccountId;
+
+                console.log('🔥 GOOGLE API CALL: fetchGoogleReviews | Location:', location.locationName, '| Tenant:', tenant.slug);
+
+                const googleReviewsResult = await fetchGoogleReviews(
+                    accountId,
                     location.googleLocationId,
-                    tenant.googleBusinessProfile.accessToken
+                    accessToken,
+                    { maxPages: 1 } // Only fetch first page to minimize API calls
                 );
 
                 let newReviewsCount = 0;
                 let updatedReviewsCount = 0;
 
-                // Process each review
+                // FIX: googleReviewsResult.reviews is the array, not googleReviewsResult directly
+                const googleReviews = googleReviewsResult.reviews || [];
+
                 for (const googleReview of googleReviews) {
                     const existingReview = await Review.findOne({
-                        google_review_id: googleReview.google_review_id
+                        where: { google_review_id: googleReview.google_review_id }
                     });
 
                     if (existingReview) {
-                        // Update existing review
                         existingReview.has_reply = googleReview.has_reply;
                         existingReview.rating = googleReview.rating;
                         existingReview.review_text = googleReview.review_text;
                         await existingReview.save();
                         updatedReviewsCount++;
                     } else {
-                        // Create new review
                         await Review.create({
-                            tenant: tenant._id,
-                            location: location._id,
+                            tenantId: tenant.id,
+                            locationId: location.id,
                             ...googleReview,
                         });
                         newReviewsCount++;
@@ -568,20 +720,42 @@ const fetchAndSyncReviews = async (req, res) => {
                 totalUpdatedReviews += updatedReviewsCount;
 
                 locationResults.push({
-                    locationId: location._id,
+                    locationId: location.id,
                     locationName: location.name,
-                    totalFetched: googleReviews.length,
-                    newReviews: newReviewsCount,
-                    updatedReviews: updatedReviewsCount
+                    status: 'success',
+                    new: newReviewsCount,
+                    updated: updatedReviewsCount
                 });
-
-                console.log(`✓ Synced reviews for ${location.name}: ${newReviewsCount} new, ${updatedReviewsCount} updated`);
 
             } catch (locError) {
                 console.error(`Error syncing reviews for location ${location.name}:`, locError.message);
+
+                // If it's a 429 error, stop sync immediately and set cooldown
+                if (locError.code === 'QUOTA_EXCEEDED' || locError.status === 429 ||
+                    locError.response?.status === 429 || locError.message?.includes('429')) {
+                    console.error('🚨 429 ERROR - Stopping sync and activating cooldown');
+
+                    // Set cooldown
+                    const cooldownKey = `quota_${tenantId}`;
+                    quotaCooldowns.set(cooldownKey, Date.now() + QUOTA_COOLDOWN_DURATION);
+
+                    return res.status(429).json({
+                        success: false,
+                        message: 'Google API rate limit reached. Sync stopped. Please try again later.',
+                        retryAfter: Math.ceil(QUOTA_COOLDOWN_DURATION / 1000),
+                        partialResults: {
+                            totalNewReviews,
+                            totalUpdatedReviews,
+                            locationsProcessed: locationResults.length,
+                            locationResults
+                        }
+                    });
+                }
+
                 locationResults.push({
-                    locationId: location._id,
+                    locationId: location.id,
                     locationName: location.name,
+                    status: 'failed',
                     error: locError.message
                 });
             }
@@ -589,7 +763,7 @@ const fetchAndSyncReviews = async (req, res) => {
 
         res.json({
             success: true,
-            message: 'Reviews synced successfully',
+            message: 'Reviews sync process completed',
             data: {
                 totalNewReviews,
                 totalUpdatedReviews,
@@ -605,15 +779,106 @@ const fetchAndSyncReviews = async (req, res) => {
             message: 'Failed to sync reviews',
             error: error.message
         });
+    } finally {
+        // Always release the sync lock
+        activeSyncs.delete(req.user.tenant || req.user.tenantId);
     }
 };
 
 /**
- * Get all locations for the authenticated tenant
- * @route GET /api/google-oauth/locations
- * @returns {object} List of locations
+ * Get Google Business connection status
  */
-const getLocations = async (req, res) => {
+const getConnectionStatus = async (req, res) => {
+    try {
+        const tenantId = req.user.tenant || req.user.tenantId;
+
+        if (!tenantId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Tenant ID not found in token. Please login again.'
+            });
+        }
+
+        const tenant = await Tenant.findByPk(tenantId);
+
+        if (!tenant) {
+            return res.status(404).json({
+                success: false,
+                message: `Tenant not found for ID: ${tenantId}. Please contact support.`
+            });
+        }
+
+        const isConnected = !!(tenant.gbp_accessToken && tenant.gbp_refreshToken);
+
+        const response = {
+            success: true,
+            isConnected,
+        };
+
+        if (isConnected) {
+            response.accountId = tenant.gbp_accountId;
+            response.tokenExpiry = tenant.gbp_tokenExpiry;
+            response.isTokenExpired = new Date() > new Date(tenant.gbp_tokenExpiry);
+
+            response.locationsCount = await Location.count({
+                where: {
+                    tenantId: tenantId,
+                    isActive: true
+                }
+            });
+
+        }
+
+        res.json(response);
+        console.log(response);
+
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * Disconnect Google Business account
+ */
+const disconnectGoogleAccount = async (req, res) => {
+    try {
+        const tenantId = req.user.tenant || req.user.tenantId;
+        const tenant = await Tenant.findByPk(tenantId);
+
+        if (!tenant) return res.status(404).json({ success: false, message: 'Tenant not found' });
+
+        if (tenant.gbp_accessToken) {
+            try {
+                const oauth2Client = getOAuth2Client();
+                await oauth2Client.revokeToken(tenant.gbp_accessToken);
+            } catch (e) {
+                console.warn('Could not revoke token with Google (might already be invalid):', e.message);
+            }
+        }
+
+        // Use update or set properties
+        tenant.gbp_accountId = null;
+        tenant.gbp_accessToken = null;
+        tenant.gbp_refreshToken = null;
+        tenant.gbp_tokenExpiry = null;
+
+        await tenant.save();
+
+        res.json({
+            success: true,
+            message: 'Google Business account disconnected successfully'
+        });
+
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Failed to disconnect', error: error.message });
+    }
+};
+
+/**
+ * Verify if the connected Google account has a Google Business Profile
+ * @route GET /api/google-oauth/verify-business-account
+ */
+const verifyGoogleBusinessAccount = async (req, res) => {
     try {
         const tenantId = req.user.tenant || req.user.tenantId;
 
@@ -624,10 +889,158 @@ const getLocations = async (req, res) => {
             });
         }
 
-        const locations = await Location.find({
-            tenant: tenantId,
-            isActive: true
-        }).select('name slug address googleLocationId createdAt');
+        // CRITICAL FIX: Check cooldown at ROUTE LEVEL (before any processing)
+        const cooldownKey = `quota_${tenantId}`;
+        if (quotaCooldowns.has(cooldownKey)) {
+            const cooldownUntil = quotaCooldowns.get(cooldownKey);
+            const remainingMinutes = Math.ceil((cooldownUntil - Date.now()) / 60000);
+            console.log(`⛔ Route blocked - quota cooldown active (${remainingMinutes} min remaining)`);
+            return res.status(429).json({
+                success: false,
+                message: `Google API quota cooldown active. Please retry in ${remainingMinutes} minutes.`,
+                retryAfter: 600
+            });
+        }
+
+        const tenant = await Tenant.findByPk(tenantId);
+        if (!tenant) {
+            return res.status(404).json({
+                success: false,
+                message: 'Tenant not found'
+            });
+        }
+
+        if (!tenant.gbp_refreshToken) {
+            return res.status(400).json({
+                success: false,
+                hasBusinessAccount: false,
+                message: 'Google account not connected. Please connect first.'
+            });
+        }
+
+        // OPTIMIZATION: If we already have the account ID stored, skip the API call
+        if (tenant.gbp_accountId) {
+            console.log(`✓ Using cached account ID for tenant ${tenant.slug}: ${tenant.gbp_accountId}`);
+            return res.json({
+                success: true,
+                hasBusinessAccount: true,
+                accountId: tenant.gbp_accountId,
+                message: 'Google Business Profile already verified!',
+                cached: true
+            });
+        }
+
+        // Set up OAuth client
+        const oauth2Client = getOAuth2Client();
+
+        let accessToken;
+        try {
+            accessToken = await ensureValidToken(tenant, tenantId);
+        } catch (err) {
+            if (err.message === 'QUOTA_COOLDOWN_ACTIVE') {
+                return res.status(429).json({
+                    success: false,
+                    message: 'Google API cooldown active. Please retry later.',
+                    retryAfter: 600
+                });
+            }
+            throw err;
+        }
+
+        oauth2Client.setCredentials({
+            access_token: accessToken,
+            refresh_token: tenant.gbp_refreshToken
+        });
+
+        try {
+            // Use SINGLE source of truth for account ID
+            const accountId = await getGoogleAccountId({
+                tenantId,
+                authClient: oauth2Client
+            });
+
+            // Extract just the ID number from "accounts/123456789"
+            const accountIdOnly = accountId.includes('/') ? accountId.split('/')[1] : accountId;
+
+            console.log(`✅ Account ID retrieved: ${accountId}`);
+
+            return res.json({
+                success: true,
+                hasBusinessAccount: true,
+                accountId: accountIdOnly,
+                message: 'Google Business Profile found successfully!'
+            });
+
+        } catch (apiError) {
+            console.error('Google API error during verification:', apiError);
+
+            // STOP on quota exceeded - NO RETRIES
+            if (apiError.message === 'RATE_LIMITED_RETRY_LATER') {
+                console.warn('⛔ Skipping verification – retry after 5+ minutes');
+                return res.status(429).json({
+                    success: false,
+                    message: 'Google API quota exceeded. Please try again in 5+ minutes.',
+                    error: 'QUOTA_EXCEEDED',
+                    retryAfter: 300
+                });
+            }
+
+            // No Google accounts found
+            if (apiError.message === 'NO_GOOGLE_ACCOUNTS_FOUND') {
+                return res.json({
+                    success: true,
+                    hasBusinessAccount: false,
+                    message: "You don't have a Google Business account. Please create a Google Business Profile first to use this feature."
+                });
+            }
+
+            // Check if it's a 403 error (no permission/no business account)
+            const errorCode = apiError.code || (apiError.response && apiError.response.status);
+            if (errorCode === 403) {
+                return res.json({
+                    success: true,
+                    hasBusinessAccount: false,
+                    message: "You don't have a Google Business account or the required permissions. Please create a Google Business Profile first."
+                });
+            }
+
+            throw apiError;
+        }
+
+    } catch (error) {
+        console.error('Verify business account error:', error);
+
+        // Check if it's a quota error
+        const errorCode = error.code || (error.response && error.response.status);
+        if (errorCode === 429 || error.message?.includes('Quota exceeded')) {
+            return res.status(429).json({
+                success: false,
+                message: 'Google API quota exceeded. Please try again in a few minutes.',
+                error: error.message
+            });
+        }
+
+        res.status(500).json({
+            success: false,
+            message: 'Failed to verify Google Business account',
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Get all locations for the authenticated tenant
+ */
+const getLocations = async (req, res) => {
+    try {
+        const tenantId = req.user.tenant || req.user.tenantId;
+        const locations = await Location.findAll({
+            where: {
+                tenantId: tenantId,
+                isActive: true
+            },
+            attributes: ['name', 'slug', 'address', 'googleLocationId', 'createdAt']
+        });
 
         res.json({
             success: true,
@@ -636,10 +1049,175 @@ const getLocations = async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Get locations error:', error);
+        res.status(500).json({ success: false, message: 'Failed to get locations', error: error.message });
+    }
+};
+
+/**
+ * Initial sync after OAuth - runs ONCE to fetch and store all Google data
+ * @route POST /api/google-oauth/initial-sync
+ */
+const initialGoogleSync = async (req, res) => {
+    try {
+        const tenantId = req.user.tenant || req.user.tenantId;
+
+        if (!tenantId) {
+            return res.status(400).json({ success: false, message: 'Tenant ID is required' });
+        }
+
+        const tenant = await Tenant.findByPk(tenantId);
+        if (!tenant) {
+            return res.status(404).json({ success: false, message: 'Tenant not found' });
+        }
+
+        // Check if already synced
+        if (tenant.gbp_initialSyncDone) {
+            return res.json({
+                success: true,
+                message: 'Initial sync already completed',
+                alreadySynced: true
+            });
+        }
+
+        if (!tenant.gbp_refreshToken) {
+            return res.status(400).json({
+                success: false,
+                message: 'Google Business Profile not connected.'
+            });
+        }
+
+        console.log('🚀 Starting INITIAL SYNC for tenant:', tenant.slug);
+
+        // Set up OAuth client
+        const oauth2Client = getOAuth2Client();
+
+        let accessToken;
+        try {
+            accessToken = await ensureValidToken(tenant, tenantId);
+        } catch (tokenError) {
+            if (tokenError.message === 'QUOTA_COOLDOWN_ACTIVE') {
+                return res.status(429).json({
+                    success: false,
+                    message: 'Google API cooldown active. Initial sync will retry automatically.',
+                    retryAfter: 600
+                });
+            }
+            throw tokenError;
+        }
+
+        oauth2Client.setCredentials({
+            access_token: accessToken,
+            refresh_token: tenant.gbp_refreshToken
+        });
+
+        // STEP 1: Get account ID
+        console.log('Step 1/3: Fetching Google account...');
+        let accountId;
+        try {
+            accountId = await getGoogleAccountId({
+                tenantId,
+                authClient: oauth2Client
+            });
+        } catch (accountError) {
+            if (accountError.message === 'RATE_LIMITED_RETRY_LATER') {
+                const remainingMinutes = Math.ceil(accountError.remainingMinutes || 0.5);
+                return res.status(429).json({
+                    success: false,
+                    message: `Google API quota exceeded. Please retry in ${remainingMinutes} minute(s).`,
+                    error: 'RATE_LIMITED_RETRY_LATER',
+                    retryAfter: remainingMinutes * 60
+                });
+            }
+            throw accountError;
+        }
+
+        // STEP 2: Fetch and save locations
+        console.log('Step 2/3: Fetching locations...');
+        const locationResult = await fetchAndSaveLocations(tenant, oauth2Client, accountId);
+
+        // STEP 3: Fetch and save reviews for all locations
+        console.log('Step 3/3: Fetching reviews...');
+        const locations = await Location.findAll({
+            where: {
+                tenantId: tenantId,
+                isActive: true
+            }
+        });
+
+        let totalNewReviews = 0;
+        let totalUpdatedReviews = 0;
+
+        for (const location of locations) {
+            await sleep(1000); // Delay between locations
+
+            try {
+                const googleReviews = await fetchGoogleReviews(
+                    accountId,
+                    location.googleLocationId,
+                    accessToken
+                );
+
+                for (const googleReview of googleReviews.reviews || []) {
+                    const existingReview = await Review.findOne({
+                        where: { google_review_id: googleReview.google_review_id }
+                    });
+
+                    if (existingReview) {
+                        existingReview.has_reply = googleReview.has_reply;
+                        existingReview.rating = googleReview.rating;
+                        existingReview.review_text = googleReview.review_text;
+                        await existingReview.save();
+                        totalUpdatedReviews++;
+                    } else {
+                        await Review.create({
+                            tenantId: tenant.id,
+                            locationId: location.id,
+                            ...googleReview,
+                        });
+                        totalNewReviews++;
+                    }
+                }
+            } catch (locError) {
+                console.error(`Error fetching reviews for location ${location.locationName}:`, locError.message);
+            }
+        }
+
+        // Mark sync as completed
+        tenant.gbp_initialSyncDone = true;
+        tenant.gbp_lastSyncAt = new Date();
+        await tenant.save();
+
+        console.log(`✅ INITIAL SYNC COMPLETE: ${totalNewReviews} new, ${totalUpdatedReviews} updated`);
+
+        res.json({
+            success: true,
+            message: 'Initial sync completed successfully',
+            data: {
+                accountId,
+                locationsFound: locationResult.total,
+                locationsSaved: locationResult.saved,
+                reviewsNew: totalNewReviews,
+                reviewsUpdated: totalUpdatedReviews
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Initial sync error:', error);
+
+        // Handle rate limit errors
+        if (error.message === 'RATE_LIMITED_RETRY_LATER' || error.code === 'QUOTA_EXCEEDED' || error.status === 429) {
+            const remainingMinutes = Math.ceil(error.remainingMinutes || 5);
+            return res.status(429).json({
+                success: false,
+                message: `Google API quota exceeded. Please retry in ${remainingMinutes} minute(s).`,
+                error: 'RATE_LIMITED_RETRY_LATER',
+                retryAfter: remainingMinutes * 60
+            });
+        }
+
         res.status(500).json({
             success: false,
-            message: 'Failed to get locations',
+            message: 'Initial sync failed. Please try again later.',
             error: error.message
         });
     }
@@ -648,9 +1226,15 @@ const getLocations = async (req, res) => {
 module.exports = {
     initiateOAuthFlow,
     handleOAuthCallback,
+    syncGoogleLocations,
     getConnectionStatus,
     disconnectGoogleAccount,
     refreshTenantAccessToken,
     fetchAndSyncReviews,
     getLocations,
+    verifyGoogleBusinessAccount,
+    initialGoogleSync,
+    // Export quota cooldown map for other controllers
+    quotaCooldowns,
+    QUOTA_COOLDOWN_DURATION,
 };

@@ -1,4 +1,4 @@
-@import "tailwindcss";
+
 
 /* CSS Variables for Light and Dark Themes */
 :root[data-theme="light"] {
@@ -191,5 +191,83 @@
   .grid-col-5, .grid-col-6, .grid-col-7, .grid-col-8,
   .grid-col-9, .grid-col-10, .grid-col-11, .grid-col-12 {
     grid-column: span 1;
+  }
+}
+
+/* Spinner Animation for Lazy Loading */
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Enhanced Mobile Responsiveness */
+@media (max-width: 640px) {
+  .main-content {
+    margin-left: 0;
+    padding-top: 16px;
+    padding-bottom: 70px;
+  }
+  
+  .page-header {
+    padding: 16px 20px;
+  }
+  
+  .page-content {
+    padding: 16px;
+  }
+  
+  .page-title {
+    font-size: 20px;
+  }
+  
+  .page-subtitle {
+    font-size: 13px;
+  }
+  
+  .widget-card {
+    padding: 16px;
+  }
+  
+  .widget-title {
+    font-size: 14px;
+  }
+  
+  .grid-container {
+    gap: 12px;
+  }
+}
+
+/* Mobile-specific utilities */
+.mobile-hidden {
+  display: block;
+}
+
+.mobile-only {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .mobile-hidden {
+    display: none !important;
+  }
+  
+  .mobile-only {
+    display: block;
+  }
+  
+  /* Ensure tables are scrollable on mobile */
+  .table-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  /* Stack items vertically on mobile */
+  .mobile-stack {
+    flex-direction: column !important;
+  }
+  
+  /* Full width on mobile */
+  .mobile-full-width {
+    width: 100% !important;
   }
 }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { apiRequest } from '../../utils/api'
+import './reviews.css'
 
 export default function Reviews() {
     const [selectedReview, setSelectedReview] = useState(null)
@@ -11,13 +12,81 @@ export default function Reviews() {
     const [reviews, setReviews] = useState([])
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
+    const [isSyncing, setIsSyncing] = useState(false)
+    const [syncMessage, setSyncMessage] = useState(null)
+    const [isInitialSyncPending, setIsInitialSyncPending] = useState(false)
 
     useEffect(() => {
-        // Always fetch reviews when component mounts
-        fetchReviews()
+        // ONLY fetch reviews from DATABASE
+        fetchReviewsFromDB()
+        checkSyncStatus()
     }, [])
 
-    const fetchReviews = async () => {
+    // Check if initial sync is needed
+    const checkSyncStatus = async () => {
+        try {
+            const statusResult = await apiRequest('/api/google-oauth/status')
+            
+            if (statusResult.success && statusResult.isConnected) {
+                // Check if initial sync is done by checking if we have reviews
+                const reviewsResult = await apiRequest('/api/client/reviews')
+                const hasReviews = reviewsResult.success && reviewsResult.data?.reviews?.length > 0
+                
+                if (!hasReviews) {
+                    setIsInitialSyncPending(true)
+                }
+            }
+        } catch (err) {
+            console.error('Error checking sync status:', err)
+        }
+    }
+
+    // Trigger initial sync (ONE TIME after OAuth)
+    const triggerInitialSync = async () => {
+        try {
+            setIsSyncing(true)
+            setSyncMessage('🚀 Starting initial sync from Google Business Profile...')
+            
+            const syncResult = await apiRequest('/api/google-oauth/initial-sync', { method: 'POST' })
+            
+            if (syncResult.success) {
+                if (syncResult.alreadySynced) {
+                    setSyncMessage('✓ Data already synced. Refreshing...')
+                } else {
+                    const { reviewsNew, reviewsUpdated } = syncResult.data || {}
+                    setSyncMessage(`✓ Initial sync complete! ${reviewsNew} new reviews imported.`)
+                }
+                
+                setIsInitialSyncPending(false)
+                
+                // Fetch reviews from DB
+                await fetchReviewsFromDB()
+            } else {
+                if (syncResult.message?.includes('cooldown')) {
+                    const minutes = syncResult.retryAfter ? Math.ceil(syncResult.retryAfter / 60) : 1
+                    setSyncMessage(`⏰ Google API cooldown active. Please wait ${minutes} minute(s) and try again.`)
+                } else {
+                    setSyncMessage(`⚠️ ${syncResult.message || 'Sync failed. Please try again.'}`)
+                }
+            }
+        } catch (err) {
+            console.error('Error in initial sync:', err)
+            
+            if (err.response?.status === 429) {
+                const retryAfter = err.response?.data?.retryAfter || 60
+                const minutes = Math.ceil(retryAfter / 60)
+                setSyncMessage(`⏰ Google API cooldown active. Retry in ${minutes} minute(s)`)
+            } else {
+                setSyncMessage(`⚠️ ${err.message || 'Failed to sync. Please try again.'}`)
+            }
+        } finally {
+            setIsSyncing(false)
+            setTimeout(() => setSyncMessage(null), 10000)
+        }
+    }
+
+    // Fetch reviews from DATABASE ONLY (NO Google API calls)
+    const fetchReviewsFromDB = async () => {
         try {
             setLoading(true)
             const result = await apiRequest('/api/client/reviews')
@@ -28,14 +97,14 @@ export default function Reviews() {
                 
                 // Transform backend data to match component structure using normalized fields
                 const transformedReviews = reviewsData.map((review, index) => ({
-                    id: review.review_key || review.ReviewKey || index + 1,
+                    id: review.review_key || review.ReviewKey || review.id || index + 1,
                     reviewer: review.reviewer_name || review['Reviewer Name'] || 'Anonymous',
                     rating: parseInt(review.rating) || 0,
                     platform: 'Google',
-                    date: review.Timestamp || review.timestamp || review.approved_at || new Date().toISOString(),
+                    date: review.review_created_at || review.Timestamp || review.timestamp || review.approved_at || new Date().toISOString(),
                     sentiment: review.sentiment || review.SentimentResult || 'Neutral',
                     comment: review.review_text || review.Review || '',
-                    reply: review.final_caption || review.edited_reply || review.ai_generated_reply || null,
+                    reply: review.final_caption || review.edited_reply || review.ai_generated_reply || review.reply_text || null,
                     approvalStatus: review.approval_status || review['Approval Status'] || 'pending',
                     googleReviewId: review.google_review_id || review['Review ID'],
                 }))
@@ -95,44 +164,57 @@ export default function Reviews() {
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                                 <h3 className="widget-title">Review Inbox</h3>
                                 <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                                    {syncMessage && (
+                                        <span style={{ 
+                                            fontSize: '13px', 
+                                            color: syncMessage.startsWith('✓') ? '#10b981' : '#f59e0b',
+                                            padding: '4px 12px',
+                                            backgroundColor: syncMessage.startsWith('✓') ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+                                            borderRadius: '4px'
+                                        }}>
+                                            {syncMessage}
+                                        </span>
+                                    )}
                                     <span style={{ fontSize: '13px', color: 'var(--text-tertiary)' }}>
                                         {filteredReviews.length} reviews
                                     </span>
+                                    <button
+                                        onClick={fetchReviewsFromDB}
+                                        disabled={loading}
+                                        style={{
+                                            padding: '8px 16px',
+                                            backgroundColor: loading ? 'var(--bg-tertiary)' : '#10b981',
+                                            color: 'white',
+                                            border: 'none',
+                                            borderRadius: '6px',
+                                            fontSize: '13px',
+                                            fontWeight: '500',
+                                            cursor: loading ? 'not-allowed' : 'pointer',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '6px',
+                                            transition: 'all 0.2s ease'
+                                        }}
+                                    >
+                                        {loading ? '🔄 Refreshing...' : '🔄 Refresh'}
+                                    </button>
                                 </div>
                             </div>
 
                             {/* Filters */}
-                            <div style={{
-                                display: 'flex',
-                                gap: '12px',
-                                marginBottom: '20px',
+                            <div className="filters-container" style={{
                                 padding: '16px',
                                 backgroundColor: 'var(--bg-secondary)',
-                                borderRadius: '8px',
-                                flexWrap: 'wrap'
+                                borderRadius: '8px'
                             }}>
-                                <div style={{ flex: '1', minWidth: '150px' }}>
-                                    <label style={{
-                                        display: 'block',
-                                        fontSize: '12px',
-                                        fontWeight: '600',
-                                        color: 'var(--text-secondary)',
-                                        marginBottom: '6px'
-                                    }}>
+                                <div className="filter-group">
+                                    <label className="filter-label">
                                         Platform
                                     </label>
                                     <select
                                         value={filters.platform}
                                         onChange={(e) => setFilters({ ...filters, platform: e.target.value })}
-                                        style={{
-                                            width: '100%',
-                                            padding: '8px 12px',
-                                            borderRadius: '6px',
-                                            border: '1px solid var(--border-color)',
-                                            backgroundColor: 'var(--card-bg)',
-                                            color: 'var(--text-primary)',
-                                            fontSize: '13px'
-                                        }}
+                                        className="filter-select"
                                     >
                                         <option value="all">All Platforms</option>
                                         <option value="Google">Google</option>
@@ -140,28 +222,14 @@ export default function Reviews() {
                                         <option value="Yelp">Yelp</option>
                                     </select>
                                 </div>
-                                <div style={{ flex: '1', minWidth: '150px' }}>
-                                    <label style={{
-                                        display: 'block',
-                                        fontSize: '12px',
-                                        fontWeight: '600',
-                                        color: 'var(--text-secondary)',
-                                        marginBottom: '6px'
-                                    }}>
+                                <div className="filter-group">
+                                    <label className="filter-label">
                                         Rating
                                     </label>
                                     <select
                                         value={filters.rating}
                                         onChange={(e) => setFilters({ ...filters, rating: e.target.value })}
-                                        style={{
-                                            width: '100%',
-                                            padding: '8px 12px',
-                                            borderRadius: '6px',
-                                            border: '1px solid var(--border-color)',
-                                            backgroundColor: 'var(--card-bg)',
-                                            color: 'var(--text-primary)',
-                                            fontSize: '13px'
-                                        }}
+                                        className="filter-select"
                                     >
                                         <option value="all">All Ratings</option>
                                         <option value="5">5 Stars</option>
@@ -171,28 +239,14 @@ export default function Reviews() {
                                         <option value="1">1 Star</option>
                                     </select>
                                 </div>
-                                <div style={{ flex: '1', minWidth: '150px' }}>
-                                    <label style={{
-                                        display: 'block',
-                                        fontSize: '12px',
-                                        fontWeight: '600',
-                                        color: 'var(--text-secondary)',
-                                        marginBottom: '6px'
-                                    }}>
+                                <div className="filter-group">
+                                    <label className="filter-label">
                                         Sentiment
                                     </label>
                                     <select
                                         value={filters.sentiment}
                                         onChange={(e) => setFilters({ ...filters, sentiment: e.target.value })}
-                                        style={{
-                                            width: '100%',
-                                            padding: '8px 12px',
-                                            borderRadius: '6px',
-                                            border: '1px solid var(--border-color)',
-                                            backgroundColor: 'var(--card-bg)',
-                                            color: 'var(--text-primary)',
-                                            fontSize: '13px'
-                                        }}
+                                        className="filter-select"
                                     >
                                         <option value="all">All Sentiments</option>
                                         <option value="Positive">Positive</option>
@@ -203,7 +257,7 @@ export default function Reviews() {
                             </div>
 
                             {/* Review Table */}
-                            <div style={{ overflowX: 'auto' }}>
+                            <div className="table-container">
                                 {filteredReviews.length === 0 ? (
                                     <div style={{ 
                                         textAlign: 'center', 
@@ -211,87 +265,133 @@ export default function Reviews() {
                                         color: 'var(--text-tertiary)' 
                                     }}>
                                         <div style={{ fontSize: '48px', marginBottom: '16px' }}>📝</div>
-                                        <p style={{ fontSize: '16px', fontWeight: '500', marginBottom: '8px' }}>
-                                            No reviews found
+                                        <p style={{ fontSize: '16px', fontWeight: '500', marginBottom: '8px', color: 'var(--text-primary)' }}>
+                                            No reviews found yet
                                         </p>
-                                        <p style={{ fontSize: '13px' }}>
-                                            {reviews.length === 0 
-                                                ? 'Start by fetching reviews from your Google Business Profile' 
-                                                : 'Try adjusting your filters to see more reviews'}
-                                        </p>
-                                    </div>
-                                ) : (
-                                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                                        <thead>
-                                            <tr style={{
-                                                backgroundColor: 'var(--bg-secondary)',
-                                                borderBottom: '2px solid var(--border-color)'
-                                            }}>
-                                                <th style={{ padding: '12px', textAlign: 'left', fontSize: '13px', fontWeight: '600', color: 'var(--text-secondary)' }}>Reviewer</th>
-                                                <th style={{ padding: '12px', textAlign: 'left', fontSize: '13px', fontWeight: '600', color: 'var(--text-secondary)' }}>Rating</th>
-                                                <th style={{ padding: '12px', textAlign: 'left', fontSize: '13px', fontWeight: '600', color: 'var(--text-secondary)' }}>Platform</th>
-                                                <th style={{ padding: '12px', textAlign: 'left', fontSize: '13px', fontWeight: '600', color: 'var(--text-secondary)' }}>Date</th>
-                                                <th style={{ padding: '12px', textAlign: 'left', fontSize: '13px', fontWeight: '600', color: 'var(--text-secondary)' }}>Sentiment</th>
-                                                <th style={{ padding: '12px', textAlign: 'left', fontSize: '13px', fontWeight: '600', color: 'var(--text-secondary)' }}>Status</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {filteredReviews.map((review) => (
-                                                <tr
-                                                    key={review.id}
-                                                    onClick={() => setSelectedReview(review)}
+                                        {isInitialSyncPending ? (
+                                            <div style={{ marginTop: '16px' }}>
+                                                <p style={{ fontSize: '13px', marginBottom: '16px' }}>
+                                                    Your Google Business Profile is connected.<br/>
+                                                    Click below to import your reviews.
+                                                </p>
+                                                <button
+                                                    onClick={triggerInitialSync}
+                                                    disabled={isSyncing}
                                                     style={{
-                                                        borderBottom: '1px solid var(--border-color)',
-                                                        cursor: 'pointer',
-                                                        backgroundColor: selectedReview?.id === review.id ? 'var(--hover-bg)' : 'transparent',
-                                                        transition: 'background-color 0.2s'
-                                                    }}
-                                                    onMouseEnter={(e) => {
-                                                        if (selectedReview?.id !== review.id) {
-                                                            e.currentTarget.style.backgroundColor = 'var(--bg-secondary)'
-                                                        }
-                                                    }}
-                                                    onMouseLeave={(e) => {
-                                                        if (selectedReview?.id !== review.id) {
-                                                            e.currentTarget.style.backgroundColor = 'transparent'
-                                                        }
+                                                        padding: '12px 24px',
+                                                        backgroundColor: isSyncing ? '#94a3b8' : '#4285F4',
+                                                        color: 'white',
+                                                        border: 'none',
+                                                        borderRadius: '6px',
+                                                        fontSize: '14px',
+                                                        fontWeight: '500',
+                                                        cursor: isSyncing ? 'not-allowed' : 'pointer'
                                                     }}
                                                 >
-                                                    <td style={{ padding: '16px', fontSize: '14px', color: 'var(--text-primary)', fontWeight: '500' }}>
-                                                        {review.reviewer}
-                                                    </td>
-                                                    <td style={{ padding: '16px', fontSize: '14px' }}>
-                                                        {getRatingStars(review.rating)}
-                                                    </td>
-                                                    <td style={{ padding: '16px', fontSize: '13px', color: 'var(--text-secondary)' }}>
-                                                        {review.platform}
-                                                    </td>
-                                                    <td style={{ padding: '16px', fontSize: '13px', color: 'var(--text-secondary)' }}>
-                                                        {new Date(review.date).toLocaleDateString()}
-                                                    </td>
-                                                    <td style={{ padding: '16px' }}>
-                                                        <span style={{
-                                                            padding: '4px 12px',
-                                                            borderRadius: '12px',
-                                                            fontSize: '12px',
-                                                            fontWeight: '600',
-                                                            backgroundColor: getSentimentColor(review.sentiment) + '20',
-                                                            color: getSentimentColor(review.sentiment)
-                                                        }}>
+                                                    {isSyncing ? '🔄 Importing Reviews...' : '📥 Import Reviews from Google'}
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <p style={{ fontSize: '13px', marginTop: '8px' }}>
+                                                {reviews.length === 0 
+                                                    ? 'Reviews will appear once your Google Business Profile finishes initial sync.' 
+                                                    : 'Try adjusting your filters to see more reviews'}
+                                            </p>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <>
+                                        {/* Desktop Table View */}
+                                        <table className="reviews-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Reviewer</th>
+                                                    <th>Rating</th>
+                                                    <th>Platform</th>
+                                                    <th>Date</th>
+                                                    <th>Sentiment</th>
+                                                    <th>Status</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {filteredReviews.map((review) => (
+                                                    <tr
+                                                        key={review.id}
+                                                        onClick={() => setSelectedReview(review)}
+                                                        style={{
+                                                            backgroundColor: selectedReview?.id === review.id ? 'var(--hover-bg)' : 'transparent'
+                                                        }}
+                                                    >
+                                                        <td style={{ padding: '16px', fontSize: '14px', color: 'var(--text-primary)', fontWeight: '500' }}>
+                                                            {review.reviewer}
+                                                        </td>
+                                                        <td style={{ padding: '16px', fontSize: '14px' }}>
+                                                            {getRatingStars(review.rating)}
+                                                        </td>
+                                                        <td style={{ padding: '16px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                                                            {review.platform}
+                                                        </td>
+                                                        <td style={{ padding: '16px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                                                            {new Date(review.date).toLocaleDateString()}
+                                                        </td>
+                                                        <td style={{ padding: '16px' }}>
+                                                            <span style={{
+                                                                padding: '4px 12px',
+                                                                borderRadius: '12px',
+                                                                fontSize: '12px',
+                                                                fontWeight: '600',
+                                                                backgroundColor: getSentimentColor(review.sentiment) + '20',
+                                                                color: getSentimentColor(review.sentiment)
+                                                            }}>
+                                                                {review.sentiment}
+                                                            </span>
+                                                        </td>
+                                                        <td style={{ padding: '16px', fontSize: '13px' }}>
+                                                            {review.reply ? (
+                                                                <span style={{ color: '#10b981' }}>✓ Replied</span>
+                                                            ) : (
+                                                                <span style={{ color: '#f59e0b' }}>● Pending</span>
+                                                            )}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                        
+                                        {/* Mobile Card View */}
+                                        <div className="mobile-card-view">
+                                            {filteredReviews.map((review) => (
+                                                <div 
+                                                    key={review.id}
+                                                    className="review-card"
+                                                    onClick={() => setSelectedReview(review)}
+                                                    style={{
+                                                        borderColor: selectedReview?.id === review.id ? 'var(--primary-color)' : 'var(--border-color)'
+                                                    }}
+                                                >
+                                                    <div className="review-card-header">
+                                                        <span className="review-card-reviewer">{review.reviewer}</span>
+                                                        <span className="review-card-rating">{getRatingStars(review.rating)}</span>
+                                                    </div>
+                                                    <div className="review-card-meta">
+                                                        <span>{review.platform}</span>
+                                                        <span>{new Date(review.date).toLocaleDateString()}</span>
+                                                    </div>
+                                                    <div className="review-card-comment">
+                                                        {review.comment.length > 120 ? review.comment.substring(0, 120) + '...' : review.comment}
+                                                    </div>
+                                                    <div className="review-card-footer">
+                                                        <span className={`sentiment-badge sentiment-${review.sentiment.toLowerCase()}`}>
                                                             {review.sentiment}
                                                         </span>
-                                                </td>
-                                                <td style={{ padding: '16px', fontSize: '13px' }}>
-                                                    {review.reply ? (
-                                                        <span style={{ color: '#10b981' }}>✓ Replied</span>
-                                                    ) : (
-                                                        <span style={{ color: '#f59e0b' }}>● Pending</span>
-                                                    )}
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                                                        <span style={{ fontSize: '12px', color: review.reply ? '#10b981' : '#f59e0b' }}>
+                                                            {review.reply ? '✓ Replied' : '● Pending'}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </>
                                 )}
                             </div>
                         </div>

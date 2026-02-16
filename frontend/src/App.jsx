@@ -8,8 +8,10 @@ import { useLocation } from 'react-router-dom'
 function App() {
   const location = useLocation()
   const isAuthPage = location.pathname === '/login' || location.pathname === '/onboarding'
+  const isAdminPage = location.pathname.startsWith('/admin')
 
-  if (isAuthPage) {
+  // Don't show client sidebar/navbar on auth pages or admin pages
+  if (isAuthPage || isAdminPage) {
     return (
       <ThemeProvider>
         <AppRoute />

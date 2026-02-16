@@ -1,47 +1,44 @@
-const mongoose = require('mongoose');
+const { Sequelize } = require('sequelize');
 require('dotenv').config();
 
-/**
- * MongoDB Database Configuration
- * Handles connection to MongoDB database
- */
+const sequelize = new Sequelize(
+  process.env.DB_NAME || 'ai_review_mgnt',
+  process.env.DB_USER || 'postgres',
+  process.env.DB_PASSWORD || 'password',
+  {
+    host: process.env.DB_HOST || 'localhost',
+    port: process.env.DB_PORT || 5432,
+    dialect: 'postgres',
+    logging: false, // set to console.log if you want SQL logs
+    pool: {
+      max: 5,
+      min: 0,
+      acquire: 30000,
+      idle: 10000
+    }
+  }
+);
 
 const connectDB = async () => {
-    try {
-        const mongoURI =
-            process.env.mongoURI ;
+  try {
+    await sequelize.authenticate();
+    console.log('✓ PostgreSQL Connected (localhost)');
 
-        // Connect to MongoDB (Mongoose v7+ compatible)
-        const conn = await mongoose.connect(mongoURI);
-
-        console.log(`✓ MongoDB Connected: ${conn.connection.host}`);
-        console.log(`✓ Database: ${conn.connection.name}`);
-
-        // Connection event listeners
-        mongoose.connection.on('error', (err) => {
-            console.error('MongoDB connection error:', err);
-        });
-
-        mongoose.connection.on('disconnected', () => {
-            console.log('MongoDB disconnected');
-        });
-
-        // Graceful shutdown
-        process.on('SIGINT', async () => {
-            try {
-                await mongoose.connection.close();
-                console.log('MongoDB connection closed due to app termination');
-                process.exit(0);
-            } catch (err) {
-                console.error('Error during MongoDB shutdown:', err);
-                process.exit(1);
-            }
-        });
-
-    } catch (error) {
-        console.error('Error connecting to MongoDB:', error.message);
-        process.exit(1);
+    // DEV only — use migrations in production
+    await sequelize.sync({ alter: true });
+    console.log('✓ Database Synced');
+  } catch (error) {
+    console.error('✗ PostgreSQL connection error:', error.message);
+    if (error.name === 'SequelizeConnectionError') {
+      console.error('----------------------------------------------------');
+      console.error('Failed to connect to the database. Please check your credentials.');
+      console.error(`Host: ${process.env.DB_HOST}`);
+      console.error(`User: ${process.env.DB_USER}`);
+      console.error(`Database: ${process.env.DB_NAME}`);
+      console.error('----------------------------------------------------');
     }
+    process.exit(1);
+  }
 };
 
-module.exports = { connectDB };
+module.exports = { sequelize, connectDB };
