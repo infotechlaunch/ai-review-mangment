@@ -1,6 +1,6 @@
 /**
  * Rate Limiter Utility
- * Helps manage API rate limits for Google Business Profile API
+ * Helps manage API rate limits for Google Business Profile
  */
 
 class RateLimiter {
