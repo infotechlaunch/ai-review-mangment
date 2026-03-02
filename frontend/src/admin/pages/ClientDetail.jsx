@@ -37,13 +37,13 @@ export default function ClientDetail() {
 
   return (
     <div className="space-y-6 admin-page-container">
-      {/* <div className="flex items-center gap-2 text-sm text-slate-500 mb-4 font-medium admin-page-header">
+      <div className="flex items-center gap-2 text-sm text-slate-500 mb-4 font-medium admin-page-header">
             <span onClick={() => navigate('/admin/clients')} className="cursor-pointer hover:text-indigo-600 transition-colors">Clients</span>
             <ChevronRight size={14} />
             <span className="text-slate-800">Details</span>
-       </div> */}
+       </div>
       
-      {/* <div className="bg-white p-6 sm:p-10 rounded-2xl shadow-sm border border-slate-200 min-h-[400px]">
+      <div className="bg-white p-6 sm:p-10 rounded-2xl shadow-sm border border-slate-200 min-h-[400px]">
         <div className="flex flex-col md:flex-row gap-8 items-start">
             <div className="w-full md:w-1/3 flex flex-col items-center text-center p-6 bg-slate-50 rounded-2xl border border-slate-100">
                 <div className="w-24 h-24 bg-gradient-to-br from-indigo-100 to-purple-100 rounded-2xl flex items-center justify-center text-indigo-600 font-bold text-4xl mb-4 shadow-sm border border-indigo-100">
@@ -109,10 +109,8 @@ export default function ClientDetail() {
                 </div>
             </div>
         </div>
-      </div> */}
-<div className='item-center'>
-<h1>client page </h1>
-</div>
+      </div>
+
       
     </div>
   )

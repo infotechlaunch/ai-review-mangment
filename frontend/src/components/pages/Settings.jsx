@@ -63,6 +63,13 @@ export default function Settings() {
         monthlyLimitPerCustomer: 1
     })
 
+    // State for Auto-Post Settings
+    const [autoPostSettings, setAutoPostSettings] = useState({
+        enabled: false,
+        minRating: 5,
+        platforms: ['facebook', 'instagram']
+    })
+
     // State for AI Reply Preview
     const [aiReply, setAiReply] = useState({
         preview: 'Thank you for your wonderful feedback! We appreciate your kind words and are delighted to hear you enjoyed your experience with us.',
@@ -347,9 +354,10 @@ export default function Settings() {
                 });
                 const data = await response.json();
                 if (data.success) {
-                    const s = data.data;
-                    if (s.autoApproval) setAutoApproval(s.autoApproval);
-                    if (s.tone) {
+                    const s = data.settings;
+                    if (s) {
+                        if (s.autoApproval) setAutoApproval(s.autoApproval);
+                        if (s.tone) {
                         setToneSettings({
                             toneStyle: s.tone.style,
                             toneKeywords: s.tone.keywords,
@@ -364,8 +372,16 @@ export default function Settings() {
                             monthlyLimitPerCustomer: s.automation.monthlyLimit
                         });
                     }
-                }
-            } catch (error) {
+                    if (s.autoPost) {
+                        setAutoPostSettings({
+                            enabled: s.autoPost.enabled,
+                            minRating: s.autoPost.minRating || 5,
+                            platforms: s.autoPost.platforms || ['facebook', 'instagram']
+                        });
+                    }
+                } // End of if (s)
+            } // End of if (data.success)
+        } catch (error) {
                 console.error('Error fetching settings:', error);
             }
         };
@@ -387,6 +403,11 @@ export default function Settings() {
                     channels: reviewRequest.channels,
                     daysAfterVisit: reviewRequest.daysAfterVisit,
                     monthlyLimit: reviewRequest.monthlyLimitPerCustomer
+                },
+                autoPost: {
+                    enabled: autoPostSettings.enabled,
+                    minRating: autoPostSettings.minRating,
+                    platforms: autoPostSettings.platforms
                 }
             };
 
@@ -562,6 +583,85 @@ export default function Settings() {
                                                 Connect
                                             </button>
                                         )}
+                                    </div>
+                                </div>
+
+                                {/* Manual Place ID Configuration (Option B - Dev Mode) */}
+                                <div className="widget-card" style={{ marginTop: '24px' }}>
+                                    <h3 className="widget-title">Development Mode (Option B)</h3>
+                                    <p style={{ fontSize: '13px', color: 'var(--text-tertiary)', marginBottom: '20px' }}>
+                                        Use Google Places API to fetch reviews without full GBP verification. 
+                                        Requires a Google Maps API Key in the server .env.
+                                    </p>
+
+                                    <div style={{
+                                        padding: '20px',
+                                        border: '1px solid var(--border-color)',
+                                        borderRadius: '8px',
+                                        backgroundColor: '#f8fafc'
+                                    }}>
+                                        <div style={{ marginBottom: '16px' }}>
+                                            <label style={{ display: 'block', fontSize: '14px', fontWeight: '600', marginBottom: '8px' }}>
+                                                Google Place ID
+                                            </label>
+                                            <div style={{ display: 'flex', gap: '12px' }}>
+                                                <input
+                                                    type="text"
+                                                    placeholder="ChIJa0fSREpYToYRwS..."
+                                                    defaultValue={localStorage.getItem('googlePlaceId') || ''}
+                                                    id="google-place-id-input"
+                                                    style={{
+                                                        flex: 1,
+                                                        padding: '10px 12px',
+                                                        border: '1px solid var(--border-color)',
+                                                        borderRadius: '6px',
+                                                        fontSize: '14px'
+                                                    }}
+                                                />
+                                                <button
+                                                    onClick={async () => {
+                                                        const placeId = document.getElementById('google-place-id-input').value;
+                                                        if (!placeId) return alert('Please enter a Place ID');
+                                                        
+                                                        try {
+                                                            const token = localStorage.getItem('token');
+                                                            const response = await fetch('http://localhost:4000/api/onboarding/update-place-id', {
+                                                                method: 'POST',
+                                                                headers: {
+                                                                    'Content-Type': 'application/json',
+                                                                    'Authorization': `Bearer ${token}`
+                                                                },
+                                                                body: JSON.stringify({ googlePlaceId: placeId })
+                                                            });
+                                                            const data = await response.json();
+                                                            if (data.success) {
+                                                                localStorage.setItem('googlePlaceId', placeId);
+                                                                alert('Place ID updated successfully!');
+                                                            } else {
+                                                                alert('Failed to update Place ID: ' + data.message);
+                                                            }
+                                                        } catch (err) {
+                                                            alert('Error updating Place ID: ' + err.message);
+                                                        }
+                                                    }}
+                                                    style={{
+                                                        padding: '10px 20px',
+                                                        backgroundColor: 'var(--primary-color)',
+                                                        color: 'white',
+                                                        border: 'none',
+                                                        borderRadius: '6px',
+                                                        fontSize: '14px',
+                                                        fontWeight: '600',
+                                                        cursor: 'pointer'
+                                                    }}
+                                                >
+                                                    Save ID
+                                                </button>
+                                            </div>
+                                            <p style={{ marginTop: '8px', fontSize: '12px', color: 'var(--text-tertiary)' }}>
+                                                Find your Place ID using the <a href="https://developers.google.com/maps/documentation/places/web-service/place-id" target="_blank" rel="noreferrer" style={{ color: 'var(--primary-color)' }}>Google Place ID Finder</a>.
+                                            </p>
+                                        </div>
                                     </div>
                                 </div>
 
@@ -1071,6 +1171,7 @@ export default function Settings() {
 
                 {/* Automation Tab */}
                 {activeTab === 'automation' && (
+                    <>
                     <div className="grid-container">
                         <div className="grid-col-12">
                             <div className="widget-card">
@@ -1247,6 +1348,91 @@ export default function Settings() {
                             </div>
                         </div>
                     </div>
+                        <div className="grid-container" style={{ marginTop: '24px' }}>
+                            <div className="grid-col-6">
+                                <div className="widget-card">
+                                    <h3 className="widget-title">Social Auto-Share</h3>
+                                    <p style={{ fontSize: '13px', color: 'var(--text-tertiary)', marginBottom: '20px' }}>
+                                        Automatically create social posts for top-rated reviews
+                                    </p>
+                                    
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                                        <div style={{ 
+                                            display: 'flex', 
+                                            justifyContent: 'space-between', 
+                                            alignItems: 'center',
+                                            padding: '16px',
+                                            backgroundColor: 'var(--bg-secondary)',
+                                            borderRadius: '8px'
+                                        }}>
+                                            <div>
+                                                <div style={{ fontWeight: '600', fontSize: '14px', color: 'var(--text-primary)' }}>
+                                                    Auto-post 5★ Reviews
+                                                </div>
+                                                <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
+                                                    Create stories/posts for new 5-star reviews
+                                                </div>
+                                            </div>
+                                            <label style={{ position: 'relative', display: 'inline-block', width: '50px', height: '24px' }}>
+                                                <input 
+                                                    type="checkbox" 
+                                                    checked={autoPostSettings.enabled}
+                                                    onChange={(e) => setAutoPostSettings({ ...autoPostSettings, enabled: e.target.checked })}
+                                                    style={{ opacity: 0, width: 0, height: 0 }}
+                                                />
+                                                <span style={{
+                                                    position: 'absolute',
+                                                    cursor: 'pointer',
+                                                    top: 0, left: 0, right: 0, bottom: 0,
+                                                    backgroundColor: autoPostSettings.enabled ? '#10b981' : '#ccc',
+                                                    borderRadius: '34px',
+                                                    transition: '.4s'
+                                                }}>
+                                                    <span style={{
+                                                        position: 'absolute',
+                                                        content: "",
+                                                        height: '18px',
+                                                        width: '18px',
+                                                        left: autoPostSettings.enabled ? '29px' : '3px',
+                                                        bottom: '3px',
+                                                        backgroundColor: 'white',
+                                                        borderRadius: '50%',
+                                                        transition: '.4s'
+                                                    }}></span>
+                                                </span>
+                                            </label>
+                                        </div>
+
+                                        {autoPostSettings.enabled && (
+                                            <div style={{ padding: '16px', backgroundColor: 'var(--bg-secondary)', borderRadius: '8px' }}>
+                                                <label style={{ display: 'block', fontSize: '13px', marginBottom: '8px', color: 'var(--text-secondary)' }}>
+                                                    Target Platforms
+                                                </label>
+                                                <div style={{ display: 'flex', gap: '12px' }}>
+                                                    {['facebook', 'instagram'].map(platform => (
+                                                        <label key={platform} style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-primary)' }}>
+                                                            <input 
+                                                                type="checkbox"
+                                                                checked={autoPostSettings.platforms.includes(platform)}
+                                                                onChange={(e) => {
+                                                                    const current = autoPostSettings.platforms;
+                                                                    const updated = e.target.checked 
+                                                                        ? [...current, platform]
+                                                                        : current.filter(p => p !== platform);
+                                                                    setAutoPostSettings({ ...autoPostSettings, platforms: updated });
+                                                                }}
+                                                            />
+                                                            <span style={{ textTransform: 'capitalize', fontSize: '14px' }}>{platform}</span>
+                                                        </label>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    </>
                 )}
 
                 {/* Notifications Tab */}

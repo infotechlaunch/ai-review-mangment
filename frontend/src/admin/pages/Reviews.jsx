@@ -30,7 +30,7 @@ export default function Reviews() {
 
   return (
     <div className="space-y-6 admin-page-container">
-      {/* <div className="admin-page-header">
+      <div className="admin-page-header">
         <div className="admin-header-content">
           <h1 className="text-2xl font-bold text-slate-800">Review Management</h1>
           <p className="text-slate-500 mt-1">Monitor and respond to customer reviews.</p>
@@ -107,7 +107,7 @@ export default function Reviews() {
             <button className="admin-action-btn py-2 px-4" disabled>Next</button>
           </div>
         </div>
-      </div> */}
+      </div>
       <div className='item-center'>
 <h1> review page</h1>
       </div>

@@ -42,9 +42,22 @@ app.use('/api/admin', require('./src/routers/admin_route'));
 // Monitoring Routes (quota, health, etc.)
 app.use('/api/monitor', require('./src/routers/monitor_route'));
 
+// Onboarding Routes
+app.use('/api/onboarding', require('./src/routers/onboarding_route'));
+
+
+// Review Routes
 // Review Routes
 app.use('/api/reviews', require('./src/routers/review_route'));
-// File name kept for path consistency, content is Postgres
+
+// Client Routes
+app.use('/api/client', require('./src/routers/client_route'));
+
+// Social Media Routes
+app.use('/api/social', require('./src/routers/social_route'));
+
+// Tenant Routes (Business Profile)
+app.use('/api/tenant', require('./src/routers/tenant_route'));
 
 // 🔧 DEV ONLY: Clear Google quota cooldown
 if (process.env.NODE_ENV !== 'production') {

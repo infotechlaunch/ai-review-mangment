@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { apiRequest } from '../../utils/api'
 import './reviews.css'
 
 export default function Reviews() {
+    const navigate = useNavigate()
     const [selectedReview, setSelectedReview] = useState(null)
     const [filters, setFilters] = useState({
         platform: 'all',
@@ -151,6 +153,39 @@ export default function Reviews() {
         return '⭐'.repeat(rating) + '☆'.repeat(5 - rating)
     }
 
+    const cleanupSearchTerm = (text) => {
+        // This function was likely intended to clean up search terms,
+        // but the provided snippet had a copy-paste error from getRatingStars.
+        // Returning the text as-is for now, or implement actual cleanup logic.
+        return text; 
+    }
+
+    const fetchReviewsFromPlaces = async () => {
+        setLoading(true);
+        setSyncMessage('🔄 Fetching from Places API...');
+        
+        try {
+            const data = await apiRequest('/api/reviews/fetch-places', {
+                method: 'POST',
+                body: JSON.stringify({})
+            });
+
+            if (data.success) {
+                const count = data.data?.newReviews || 0;
+                setSyncMessage(`✓ Synced ${count} new reviews`);
+                await fetchReviewsFromDB(); 
+            } else {
+                setSyncMessage(`❌ ${data.message || 'Failed'}`);
+            }
+        } catch (err) {
+            console.error('Sync error:', err);
+            setSyncMessage(`❌ ${err.message || 'Sync Error'}`);
+        } finally {
+            setLoading(false);
+            setTimeout(() => setSyncMessage(''), 5000);
+        }
+    };
+
     return (
         <div className="page-container">
             <div className="page-header">
@@ -178,6 +213,26 @@ export default function Reviews() {
                                     <span style={{ fontSize: '13px', color: 'var(--text-tertiary)' }}>
                                         {filteredReviews.length} reviews
                                     </span>
+                                    <button
+                                        onClick={fetchReviewsFromPlaces}
+                                        disabled={loading}
+                                        style={{
+                                            padding: '8px 16px',
+                                            backgroundColor: loading ? 'var(--bg-tertiary)' : '#4285F4',
+                                            color: 'white',
+                                            border: 'none',
+                                            borderRadius: '6px',
+                                            fontSize: '13px',
+                                            fontWeight: '500',
+                                            cursor: loading ? 'not-allowed' : 'pointer',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '6px',
+                                            transition: 'all 0.2s ease'
+                                        }}
+                                    >
+                                        {loading ? '🔄 Fetching...' : '🔍 Sync Google (Places)'}
+                                    </button>
                                     <button
                                         onClick={fetchReviewsFromDB}
                                         disabled={loading}
@@ -492,6 +547,27 @@ export default function Reviews() {
                                     cursor: 'pointer'
                                 }}>
                                     {selectedReview.reply ? 'Edit Reply' : 'Generate AI Reply'}
+                                </button>
+                                <button 
+                                    onClick={() => navigate('/social-share', { state: { review: selectedReview } })}
+                                    style={{
+                                        width: '100%',
+                                        padding: '12px',
+                                        backgroundColor: 'var(--bg-tertiary)',
+                                        color: 'var(--text-primary)',
+                                        border: '1px solid var(--border-color)',
+                                        borderRadius: '8px',
+                                        fontSize: '14px',
+                                        fontWeight: '600',
+                                        cursor: 'pointer',
+                                        marginTop: '12px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: '8px'
+                                    }}
+                                >
+                                    <span>📤</span> Share Review
                                 </button>
                             </div>
                         </div>

@@ -3,11 +3,13 @@ const router = express.Router();
 const {
     getClientDashboard,
     getClientReviews,
+    getClientSettings,
     fetchGoogleBusinessReviews,
     getSpecificGoogleReview,
     replyToGoogleReview,
     deleteGoogleReply,
-    batchFetchGoogleReviews
+    batchFetchGoogleReviews,
+    updateClientSettings
 } = require('../controller/client_controller');
 const { authenticate, authorize } = require('../middleware/auth');
 
@@ -22,6 +24,10 @@ router.use(authenticate);
 router.use(authorize(['CLIENT_OWNER', 'STAFF']));
 
 // ===== Google Sheets Based Routes =====
+// Get client settings
+router.get('/settings', getClientSettings);
+router.put('/settings', updateClientSettings);
+
 // Get client dashboard data - returns only the client's configuration
 router.get('/dashboard', getClientDashboard);
 

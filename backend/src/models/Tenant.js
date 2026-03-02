@@ -34,6 +34,52 @@ const Tenant = sequelize.define('Tenant', {
         type: DataTypes.BOOLEAN,
         defaultValue: true
     },
+    // Business Profile Fields
+    industry: {
+        type: DataTypes.STRING,
+        allowNull: true
+    },
+    phone: {
+        type: DataTypes.STRING,
+        allowNull: true
+    },
+    website: {
+        type: DataTypes.STRING,
+        allowNull: true
+    },
+    address: {
+        type: DataTypes.STRING,
+        allowNull: true
+    },
+    timezone: {
+        type: DataTypes.STRING,
+        allowNull: true
+    },
+    logoUrl: {
+        type: DataTypes.STRING,
+        allowNull: true
+    },
+    
+    // Communication Settings (WhatsApp, etc.)
+    communication_settings: {
+        type: DataTypes.JSONB,
+        defaultValue: {
+            whatsappNumber: '',
+            whatsappLink: '',
+            sendRequestsViaWhatsapp: true,
+            sendFollowupsViaWhatsapp: true
+        }
+    },
+
+    // Social Profiles
+    social_profiles: {
+        type: DataTypes.JSONB,
+        defaultValue: {
+            facebookPage: '',
+            instagramHandle: '',
+            googleReviewLink: ''
+        }
+    },
     // Google Business Profile configuration
     gbp_accountId: DataTypes.STRING,
     gbp_locationId: DataTypes.STRING,

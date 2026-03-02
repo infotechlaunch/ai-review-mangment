@@ -14,19 +14,36 @@ const {
  * For write operations, you need to set up Google Sheets API with service account
  */
 
+// Simple in-memory cache
+let clientsCache = null;
+let lastFetchTime = 0;
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
 /**
  * Get all clients from Client_Admin_Config sheet
  * @returns {Promise<Array>} Array of client configuration objects
  */
-const getAllClients = async () => {
+const getAllClients = async (forceRefresh = false) => {
     try {
+        const now = Date.now();
+        if (clientsCache && !forceRefresh && (now - lastFetchTime < CACHE_DURATION)) {
+            // console.log('  ⚡ Returning cached client config');
+            return clientsCache;
+        }
+
         // Using CSV export - simpler, no authentication needed
         const clients = await readSheetAsJSON(CLIENT_CONFIG_SHEET_ID, CLIENT_CONFIG_TAB, '0');
 
         console.log(`✓ Fetched ${clients.length} clients from Client_Admin_Config`);
+        clientsCache = clients;
+        lastFetchTime = now;
         return clients;
     } catch (error) {
         console.error('Error fetching all clients:', error.message);
+        if (clientsCache) {
+             console.warn('  ⚠️ Returning stale cache due to fetch error');
+             return clientsCache;
+        }
         throw new Error('Failed to fetch client configurations. Ensure the Google Sheet is publicly accessible.');
     }
 };

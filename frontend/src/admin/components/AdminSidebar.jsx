@@ -8,13 +8,13 @@ const sidebarStructure = [
         title: "Overview",
         items: [
             { to: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-            { to: '/admin/analytics-deme', label: 'Analytics', icon: BarChart3 },
+            { to: '/admin/analytics', label: 'Analytics', icon: BarChart3 },
         ]
     },
     {
         title: "Management",
         items: [
-            { to: '/admin/clients/deme', label: 'Clients', icon: Users },
+            { to: '/admin/clients', label: 'Clients', icon: Users },
             { to: '/admin/reviews/deme', label: 'Reviews', icon: Star },
         ]
     },

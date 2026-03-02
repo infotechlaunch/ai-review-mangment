@@ -2,7 +2,7 @@ import React, { lazy, Suspense, useEffect } from 'react'
 import { Routes, Route, useLocation, Navigate } from 'react-router-dom'
 import SkeletonLoader from './components/common/SkeletonLoader'
 import { usePrefetchRoutes, prefetchAllCommonRoutes } from './utils/routePrefetch'
-
+import Profile from './components/pages/profile'
 // Lazy load all components with preload hints
 const Dashboard = lazy(() => import(/* webpackChunkName: "dashboard", webpackPrefetch: true */ './components/pages/dashboard'))
 const Reviews = lazy(() => import(/* webpackChunkName: "reviews", webpackPrefetch: true */ './components/pages/reviews'))
@@ -14,12 +14,14 @@ const SentimentTrend = lazy(() => import(/* webpackChunkName: "sentiment-trend" 
 const ProsCons = lazy(() => import(/* webpackChunkName: "pros-cons" */ './components/pages/prosCons'))
 const Settings = lazy(() => import(/* webpackChunkName: "settings", webpackPrefetch: true */ './components/pages/Settings'))
 const Billing = lazy(() => import(/* webpackChunkName: "billing" */ './components/pages/Billing'))
+const SocialShare = lazy(() => import(/* webpackChunkName: "social-share" */ './components/pages/SocialShare'))
 const Login = lazy(() => import(/* webpackChunkName: "login" */ './components/auth/Login'))
 const BusinessSetup = lazy(() => import(/* webpackChunkName: "onboarding" */ './components/onboarding/BusinessSetup'))
 const OnboardingSuccess = lazy(() => import(/* webpackChunkName: "onboarding-success" */ './components/onboarding/OnboardingSuccess'))
 const AdminLayout = lazy(() => import(/* webpackChunkName: "admin-layout" */ './admin/Layout/AdminLayout'))
 const AdminLogin = lazy(() => import(/* webpackChunkName: "admin-login" */ './admin/Login'))
 const ProtectedAdminRoute = lazy(() => import(/* webpackChunkName: "admin-protect" */ './admin/ProtectedAdminRoute'))
+
 
 const AdminDashboardPage = lazy(() => import(/* webpackChunkName: "admin-dashboard" */ './admin/pages/Dashboard'))
 const Clients = lazy(() => import(/* webpackChunkName: "admin-clients" */ './admin/pages/Clients'))
@@ -93,6 +95,8 @@ export default function AppRoute() {
                 <Route path="/pros-cons" element={<ProsCons />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/billing" element={<Billing />} />
+                <Route path="/social-share" element={<SocialShare />} />
+                <Route path='/Profile' element={<Profile/>}/>
             </Routes>
         </Suspense>
     )

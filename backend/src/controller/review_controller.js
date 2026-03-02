@@ -3,7 +3,7 @@ const Location = require('../models/Location');
 const Tenant = require('../models/Tenant');
 const User = require('../models/User');
 const { generateReply } = require('../config/openai');
-const { fetchGoogleReviews, postReplyToGoogle } = require('../services/googleBusinessService');
+const { fetchGoogleReviews, postReplyToGoogle, fetchPlacesReviews, fetchReviewsFromSearchApi } = require('../services/googleBusinessService');
 const { Op } = require('sequelize');
 
 // Import quota cooldown map from google_oauth_controller
@@ -202,6 +202,183 @@ const fetchReviews = async (req, res) => {
             message: 'Failed to fetch reviews',
             error: error.message
         });
+    }
+};
+
+/**
+ * Fetch reviews from Google Places API (Alternative for Development Mode)
+ * @route POST /api/reviews/fetch-places
+ * @access CLIENT_OWNER, ADMIN
+ */
+const fetchReviewsFromPlaces = async (req, res) => {
+    try {
+        let { locationId, placeId: requestedPlaceId } = req.body;
+        const userId = req.user.userId;
+        const userRole = req.user.role;
+        const userTenantId = req.user.tenantId || req.user.tenant; // Handle different token structures
+
+        // Validation: SearchAPI key must be in environment
+        const apiKey = process.env.SEARCH_API_KEY;
+        console.log('apiKey', apiKey);
+        if (!apiKey) {
+            return res.status(400).json({
+                success: false,
+                message: 'SEARCH_API_KEY is not configured in the server environment.'
+            });
+        }
+
+        let location;
+        if (!locationId) {
+            // Find the FIRST location for this tenant
+            const userSlug = req.user.slug || req.user.tenantSlug;
+            const tenant = await Tenant.findOne({ where: { slug: userSlug } });
+            
+            if (!tenant) {
+                 return res.status(404).json({ success: false, message: 'Tenant not found' });
+            }
+
+            location = await Location.findOne({ 
+                where: { tenantId: tenant.id },
+                include: [{ model: Tenant, as: 'tenant' }]
+            });
+        } else {
+            // Validate specific location
+            location = await Location.findByPk(locationId, {
+                include: [{ model: Tenant, as: 'tenant' }]
+            });
+        }
+
+        if (!location) {
+            return res.status(404).json({
+                success: false,
+                message: 'No location found for this account. Please set up a location first.'
+            });
+        }
+
+        // Ensure tenant access
+        if (userRole !== 'ADMIN') {
+             const userTid = userTenantId ? userTenantId.toString() : null;
+             const locTid = (location && location.tenant && location.tenant.id) ? location.tenant.id.toString() : null;
+
+             if (!userTid || !locTid || userTid !== locTid) {
+                console.warn(`🛑 Forbidden: User tenant ${userTid} attempted to access location tenant ${locTid}`);
+                return res.status(403).json({
+                    success: false,
+                    message: 'Access denied: You do not have permission for this location.'
+                });
+             }
+        }
+
+        // Use requested placeId, or location's placeId, or fallback to the one user requested for testing
+        const placeId = requestedPlaceId || location.googlePlaceId || location.googleLocationId || 'ChIJOW6f8wclJzoRMyn7Cz98L5Q';
+        
+        if (!placeId) {
+             return res.status(400).json({
+                success: false,
+                message: 'No Google Place ID found.'
+            });
+        }
+
+        console.log(`📡 Using SearchAPI (instead of Places API) for location: ${location.name} (ID: ${placeId})`);
+
+        // Fetch reviews from SearchAPI
+        const result = await fetchReviewsFromSearchApi(placeId, apiKey, { engine: 'google_maps_reviews', maxPages: 1 });
+        const googleReviews = result.reviews || [];
+
+        console.log(`📦 Fetched ${googleReviews.length} reviews from SearchAPI`);
+
+        let newReviewsCount = 0;
+        let updatedReviewsCount = 0;
+
+        const currentTenant = location.tenant;
+
+        // Process each review
+        for (const googleReview of googleReviews) {
+            try {
+                // Check if review already exists
+                const existingReview = await Review.findOne({
+                    where: { google_review_id: googleReview.google_review_id }
+                });
+
+                if (existingReview) {
+                    updatedReviewsCount++;
+                } else {
+                    // Explicitly map model fields to avoid data type or extra property errors
+                    const reviewData = {
+                        tenantId: currentTenant.id,
+                        locationId: location.id,
+                        google_review_id: googleReview.google_review_id,
+                        reviewer_name: googleReview.reviewer_name || 'Anonymous',
+                        rating: googleReview.rating || 5,
+                        review_text: googleReview.review_text || '',
+                        review_created_at: googleReview.review_created_at || new Date(),
+                        has_reply: false,
+                        source: 'SEARCHAPI'
+                    };
+
+                    // --- AI Auto-Reply Logic ---
+                    try {
+                        const tenantSettings = currentTenant.settings || {};
+                        const toneSettings = tenantSettings.tone || {};
+                        
+                        // Generate AI Draft
+                        const generatedReply = await generateReply(
+                            reviewData.review_text,
+                            reviewData.rating,
+                            currentTenant.businessName,
+                            toneSettings
+                        );
+
+                        reviewData.ai_generated_reply = generatedReply;
+                        reviewData.ai_reply_generated_at = new Date();
+                        reviewData.edited_reply = generatedReply;
+                        reviewData.final_caption = generatedReply;
+
+                        let sentiment = 'Neutral';
+                        if (reviewData.rating >= 4) sentiment = 'Positive';
+                        else if (reviewData.rating <= 2) sentiment = 'Negative';
+                        reviewData.sentiment = sentiment;
+
+                    } catch (aiError) {
+                        console.error('Error in auto-reply generation for review:', aiError);
+                    }
+
+                    await Review.create(reviewData);
+                    newReviewsCount++;
+                }
+            } catch (innerError) {
+                console.error(`⚠️ Error processing review ${googleReview.google_review_id}:`, innerError);
+            }
+        }
+
+        res.json({
+            success: true,
+            message: 'Reviews fetched from SearchAPI successfully.',
+            data: {
+                totalFetched: googleReviews.length,
+                newReviews: newReviewsCount,
+                updatedReviews: updatedReviewsCount,
+                source: 'SEARCHAPI'
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error fetching reviews via SearchAPI:', error);
+        
+        let errorMessage = 'Failed to fetch reviews: ' + error.message;
+
+        // Make the error more descriptive if it's related to the API key missing or being invalid.
+        if (error.message.includes('401') || error.message.includes('Invalid API key') || process.env.SEARCH_API_KEY === 'YOUR_SEARCHAPI_API_KEY_HERE') {
+             errorMessage = 'SearchAPI key is missing or invalid. Please sign up at searchapi.io, get an API key, and add it to your backend/.env file as SEARCH_API_KEY.';
+        }
+
+        if (!res.headersSent) {
+            res.status(500).json({
+                success: false,
+                message: errorMessage,
+                error: error.message
+            });
+        }
     }
 };
 
@@ -567,8 +744,162 @@ const updateReply = async (req, res) => {
     }
 };
 
+/**
+ * Fetch reviews from SearchAPI (Third-party Scraper)
+ * @route POST /api/reviews/fetch-third-party
+ * @access CLIENT_OWNER, ADMIN
+ */
+const fetchReviewsFromThirdParty = async (req, res) => {
+    try {
+        let { locationId, engine = 'google_maps_reviews', maxPages = 1 } = req.body;
+        const userId = req.user.userId;
+        const userRole = req.user.role;
+        const userTenantId = req.user.tenantId || req.user.tenant;
+
+        // Validation: SearchAPI key must be in environment
+        const apiKey = process.env.SEARCH_API_KEY;
+        if (!apiKey) {
+            return res.status(400).json({
+                success: false,
+                message: 'SEARCH_API_KEY is not configured in the server environment.'
+            });
+        }
+
+        let location;
+        if (!locationId) {
+            // Find the FIRST location for this tenant
+            const userSlug = req.user.slug || req.user.tenantSlug;
+            const tenant = await Tenant.findOne({ where: { slug: userSlug } });
+            
+            if (!tenant) {
+                 return res.status(404).json({ success: false, message: 'Tenant not found' });
+            }
+
+            location = await Location.findOne({ 
+                where: { tenantId: tenant.id },
+                include: [{ model: Tenant, as: 'tenant' }]
+            });
+        } else {
+            location = await Location.findByPk(locationId, {
+                include: [{ model: Tenant, as: 'tenant' }]
+            });
+        }
+
+        if (!location) {
+            return res.status(404).json({
+                success: false,
+                message: 'No location found. Please set up a location first.'
+            });
+        }
+
+        const placeId = location.googlePlaceId || location.googleLocationId;
+        if (!placeId) {
+             return res.status(400).json({
+                success: false,
+                message: 'No Google Place ID found for this location.'
+            });
+        }
+
+        console.log(`📡 Using SearchAPI (${engine}) for location: ${location.name} (ID: ${placeId})`);
+
+        // Fetch reviews from SearchAPI
+        const result = await fetchReviewsFromSearchApi(placeId, apiKey, { engine, maxPages });
+        const googleReviews = result.reviews || [];
+
+        console.log(`📦 Fetched ${googleReviews.length} reviews from SearchAPI`);
+
+        let newReviewsCount = 0;
+        let updatedReviewsCount = 0;
+
+        const currentTenant = location.tenant;
+
+        for (const googleReview of googleReviews) {
+            try {
+                const existingReview = await Review.findOne({
+                    where: { google_review_id: googleReview.google_review_id }
+                });
+
+                if (existingReview) {
+                    updatedReviewsCount++;
+                } else {
+                    const reviewData = {
+                        tenantId: currentTenant.id,
+                        locationId: location.id,
+                        google_review_id: googleReview.google_review_id,
+                        reviewer_name: googleReview.reviewer_name || 'Anonymous',
+                        rating: googleReview.rating || 5,
+                        review_text: googleReview.review_text || '',
+                        review_created_at: googleReview.review_created_at || new Date(),
+                        has_reply: false,
+                        source: 'SEARCHAPI'
+                    };
+
+                    // AI Auto-Reply Logic
+                    try {
+                        const tenantSettings = currentTenant.settings || {};
+                        const toneSettings = tenantSettings.tone || {};
+                        
+                        const generatedReply = await generateReply(
+                            reviewData.review_text,
+                            reviewData.rating,
+                            currentTenant.businessName,
+                            toneSettings
+                        );
+
+                        reviewData.ai_generated_reply = generatedReply;
+                        reviewData.ai_reply_generated_at = new Date();
+                        reviewData.edited_reply = generatedReply;
+                        reviewData.final_caption = generatedReply;
+
+                        let sentiment = 'Neutral';
+                        if (reviewData.rating >= 4) sentiment = 'Positive';
+                        else if (reviewData.rating <= 2) sentiment = 'Negative';
+                        reviewData.sentiment = sentiment;
+
+                    } catch (aiError) {
+                        console.error('AI error for SearchAPI review:', aiError);
+                    }
+
+                    await Review.create(reviewData);
+                    newReviewsCount++;
+                }
+            } catch (innerError) {
+                console.error(`⚠️ Error processing SearchAPI review ${googleReview.google_review_id}:`, innerError);
+            }
+        }
+
+        res.json({
+            success: true,
+            message: 'Reviews fetched from SearchAPI successfully',
+            data: {
+                totalFetched: googleReviews.length,
+                newReviews: newReviewsCount,
+                updatedReviews: updatedReviewsCount,
+                source: `SEARCHAPI_${engine.toUpperCase()}`
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error fetching reviews from SearchAPI:', error);
+
+        let errorMessage = 'Failed to fetch reviews: ' + error.message;
+
+        if (error.message.includes('401') || error.message.includes('Invalid API key') || apiKey === 'YOUR_SEARCHAPI_API_KEY_HERE') {
+             errorMessage = 'SearchAPI key is missing or invalid. Please sign up at searchapi.io, get an API key, and add it to your backend/.env file as SEARCH_API_KEY.';
+        }
+
+        res.status(500).json({
+            success: false,
+            message: errorMessage,
+            error: error.message
+        });
+    }
+};
+
 module.exports = {
     fetchReviews,
+    fetchReviewsFromPlaces,
+    fetchReviewsFromThirdParty,
     getReviews,
     getReviewById,
     generateAIReply,

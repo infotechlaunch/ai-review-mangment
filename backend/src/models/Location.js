@@ -39,6 +39,10 @@ const Location = sequelize.define('Location', {
     googleAccountId: {
         type: DataTypes.STRING,
     },
+    googlePlaceId: {
+        type: DataTypes.STRING,
+        unique: true,
+    },
     isActive: {
         type: DataTypes.BOOLEAN,
         defaultValue: true,

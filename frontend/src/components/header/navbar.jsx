@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useTheme } from '../../context/ThemeContext'
 import './navbar.css'
 
+
 export default function Navbar() {
   const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
@@ -55,8 +56,7 @@ export default function Navbar() {
 
   const handleSettingsClick = () => {
     // Navigate to settings page (to be implemented)
-    console.log('Navigate to settings')
-    setShowDropdown(false)
+   navigate('/settings')
   }
 
   const handleProfileViewClick = () => {
@@ -64,7 +64,12 @@ export default function Navbar() {
     console.log('Navigate to profile')
     setShowDropdown(false)
   }
-
+const handle_profile=()=>{
+  navigate('/Profile')
+}
+const handle_setting=()=>{
+  navigate('/settings')
+}
   // Get first letter of name for avatar
   const avatarLetter = userName.charAt(0).toUpperCase()
 
@@ -133,7 +138,7 @@ export default function Navbar() {
                     <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
                     <circle cx="12" cy="7" r="4"></circle>
                   </svg>
-                  <span>View Profile</span>
+                  <span onClick={handle_profile}>View Profile</span>
                 </button>
                 
                 <button className="dropdown-item" onClick={handleSettingsClick}>
@@ -141,7 +146,7 @@ export default function Navbar() {
                     <circle cx="12" cy="12" r="3"></circle>
                     <path d="M12 1v6m0 6v6m9-9h-6m-6 0H3"></path>
                   </svg>
-                  <span>Settings</span>
+                  <span onClick={handle_setting}>Settings</span>
                 </button>
                 
                 <div className="dropdown-divider"></div>

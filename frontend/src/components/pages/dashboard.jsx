@@ -11,12 +11,40 @@ export default function Dashboard() {
     const [recentTrends, setRecentTrends] = useState([])
     const [platformStats, setPlatformStats] = useState([])
     const [clientInfo, setClientInfo] = useState(null)
+    const [isSyncing, setIsSyncing] = useState(false)
+    const [syncMessage, setSyncMessage] = useState(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
 
     useEffect(() => {
         fetchDashboardData()
     }, [])
+
+    const syncFromPlaces = async () => {
+        setIsSyncing(true);
+        setSyncMessage('🔄 Syncing...');
+        
+        try {
+            const data = await apiRequest('/api/reviews/fetch-places', {
+                method: 'POST',
+                body: JSON.stringify({})
+            });
+
+            if (data.success) {
+                const newReviewsCount = data.data?.newReviews || 0;
+                setSyncMessage(`✓ Synced ${newReviewsCount} new reviews`);
+                await fetchDashboardData(); 
+            } else {
+                setSyncMessage(`❌ ${data.message || 'Failed to fetch reviews'}`);
+            }
+        } catch (err) {
+            console.error('Fetch reviews error:', err);
+            setSyncMessage(`❌ ${err.message || 'Error fetching reviews'}`);
+        } finally {
+            setIsSyncing(false);
+            setTimeout(() => setSyncMessage(null), 5000);
+        }
+    };
 
     const fetchDashboardData = async () => {
         try {
@@ -118,7 +146,7 @@ export default function Dashboard() {
             const monthNum = monthDate.getMonth()
 
             const monthReviews = reviews.filter(r => {
-                const dateStr = r.Timestamp || r.timestamp || r.review_time || r.createTime || r.approved_at
+                const dateStr = r.review_created_at || r.Timestamp || r.timestamp || r.review_time || r.createTime || r.approved_at
                 if (!dateStr) return false
                 
                 const reviewDate = new Date(dateStr)
@@ -162,10 +190,12 @@ export default function Dashboard() {
                 <div className="page-header">
                     <div>
                         <h1 className="page-title">Dashboard</h1>
-                        <p className="page-subtitle">Welcome back, Super Admin</p>
+                        <p className="page-subtitle">Monitor and analyze your AI review management metrics at a glance</p>
                     </div>
                 </div>
-                <div className="loading-message">Loading your review metrics...</div>
+                <div className="loading-message">
+                    Loading your review metrics...
+                </div>
             </div>
         )
     }
@@ -176,134 +206,167 @@ export default function Dashboard() {
             <div className="page-header">
                 <div>
                     <h1 className="page-title">Dashboard</h1>
-                    <p className="page-subtitle">Welcome back, Super Admin</p>
+                    <p className="page-subtitle">Monitor and analyze your AI review management metrics at a glance</p>
+                </div>
+                <div className="header-actions" style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                    {syncMessage && (
+                        <span style={{ 
+                            fontSize: '13px', 
+                            color: syncMessage.startsWith('✓') ? '#10b981' : '#f59e0b',
+                            padding: '4px 12px',
+                            backgroundColor: syncMessage.startsWith('✓') ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+                            borderRadius: '4px'
+                        }}>
+                            {syncMessage}
+                        </span>
+                    )}
+                    <button
+                        onClick={syncFromPlaces}
+                        disabled={isSyncing}
+                        style={{
+                            padding: '8px 16px',
+                            backgroundColor: isSyncing ? 'var(--bg-tertiary)' : '#4285F4',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '6px',
+                            fontSize: '13px',
+                            fontWeight: '600',
+                            cursor: isSyncing ? 'not-allowed' : 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px'
+                        }}
+                    >
+                        {isSyncing ? '🔄 Syncing...' : '🔍 Sync Google (Places)'}
+                    </button>
+                    <span className="user-badge">
+                        {clientInfo?.businessName || localStorage.getItem('businessName') || 'Client'}
+                    </span>
                 </div>
             </div>
 
-            {/* Overview Section */}
-            <div className="section">
-                <div className="section-header">
-                    <div>
-                        <h2 className="section-title">Overview</h2>
-                        <p className="section-subtitle">Platform performance statistics</p>
+            {/* Metrics Grid */}
+            <div className="metrics-grid">
+                <div className="metric-card">
+                    <div className="metric-header">
+                        <span className="metric-title">Total Reviews</span>
+                        <span className="metric-icon">⭐</span>
                     </div>
-                    <div className="section-actions">
-                        <select className="time-select">
-                            <option>Last 7 Days</option>
-                            <option>Last 30 Days</option>
-                            <option>Last 90 Days</option>
-                        </select>
-                        <button className="download-btn">Download Report</button>
-                    </div>
+                    <div className="metric-value">{stats.totalReviews}</div>
+                    <div className="metric-sub">Across all connected platforms</div>
                 </div>
 
-                {/* Stats Cards */}
-                <div className="stats-grid">
-                    <div className="stat-card stat-blue">
-                        <div className="stat-icon-circle blue">
-                            <span className="stat-emoji">📊</span>
-                        </div>
-                        <div className="stat-info">
-                            <div className="stat-change positive">↗ 12%</div>
-                            <div className="stat-value">{stats.totalReviews.toLocaleString()}</div>
-                            <div className="stat-label">Total Clients</div>
-                        </div>
+                <div className="metric-card">
+                    <div className="metric-header">
+                        <span className="metric-title">Sentiment Summary</span>
+                        <span className="metric-icon">😊</span>
                     </div>
+                    <div className="metric-value">{stats.sentimentSummary}%</div>
+                    <div className="metric-sub">Positive sentiment rate</div>
+                </div>
 
-                    <div className="stat-card stat-orange">
-                        <div className="stat-icon-circle orange">
-                            <span className="stat-emoji">⭐</span>
-                        </div>
-                        <div className="stat-info">
-                            <div className="stat-change positive">↗ 25%</div>
-                            <div className="stat-value">{stats.totalReviews.toLocaleString()}</div>
-                            <div className="stat-label">Active Reviews</div>
-                        </div>
+                <div className="metric-card">
+                    <div className="metric-header">
+                        <span className="metric-title">Response Rate</span>
+                        <span className="metric-icon">💬</span>
                     </div>
+                    <div className="metric-value">{stats.responseRate}%</div>
+                    <div className="metric-sub">Reviews with responses</div>
+                </div>
 
-                    <div className="stat-card stat-green">
-                        <div className="stat-icon-circle green">
-                            <span className="stat-emoji">💰</span>
-                        </div>
-                        <div className="stat-info">
-                            <div className="stat-change positive">↗ 8%</div>
-                            <div className="stat-value">${(stats.totalReviews * 365).toLocaleString()}</div>
-                            <div className="stat-label">Total Revenue</div>
-                        </div>
+                <div className="metric-card">
+                    <div className="metric-header">
+                        <span className="metric-title">Average Rating</span>
+                        <span className="metric-icon">📊</span>
                     </div>
-
-                    <div className="stat-card stat-purple">
-                        <div className="stat-icon-circle purple">
-                            <span className="stat-emoji">⭐</span>
-                        </div>
-                        <div className="stat-info">
-                            <div className="stat-change positive">↗ 2%</div>
-                            <div className="stat-value">{stats.avgRating}</div>
-                            <div className="stat-label">Avg. Rating</div>
-                        </div>
-                    </div>
+                    <div className="metric-value">{stats.avgRating}</div>
+                    <div className="metric-sub">Out of 5 stars</div>
                 </div>
             </div>
 
-            {/* Bottom Grid */}
-            <div className="bottom-grid">
-                {/* Recent Clients */}
-                <div className="data-card">
-                    <div className="card-header">
-                        <h3 className="card-title">Recent Clients</h3>
-                        <a href="#" className="view-all-link">View All</a>
-                    </div>
-                    <div className="clients-list">
-                        {[1, 2, 3, 4, 5].map((num) => (
-                            <div key={num} className="client-item">
-                                <div className="client-avatar" style={{
-                                    background: ['#a855f7', '#10b981', '#3b82f6', '#a855f7', '#10b981'][num - 1]
-                                }}>
-                                    <span>C</span>
+            {/* Charts Grid */}
+            <div className="charts-grid">
+                {/* Sentiment Trends */}
+                <div className="chart-card trends-card">
+                    <h3 className="card-title">Sentiment Trends (Last 3 Months)</h3>
+                    
+                    <div className="trends-list">
+                        {recentTrends.map((trend, index) => (
+                            <div key={index} className="trend-item">
+                                <div className="trend-label">{trend.month}</div>
+                                <div className="trend-bar-container">
+                                    <div className="trend-bar">
+                                        {trend.positive > 0 && (
+                                            <div 
+                                                className="bar-segment positive" 
+                                                style={{ width: `${trend.positive}%` }} 
+                                            />
+                                        )}
+                                        {trend.neutral > 0 && (
+                                            <div 
+                                                className="bar-segment neutral" 
+                                                style={{ width: `${trend.neutral}%` }} 
+                                            />
+                                        )}
+                                        {trend.negative > 0 && (
+                                            <div 
+                                                className="bar-segment negative" 
+                                                style={{ width: `${trend.negative}%` }} 
+                                            />
+                                        )}
+                                    </div>
+                                    <span className="trend-value-label">
+                                        {trend.positive}%
+                                    </span>
                                 </div>
-                                <div className="client-details">
-                                    <div className="client-name">Company {num}</div>
-                                    <div className="client-email">admin@company{num}.com</div>
-                                </div>
-                                <div className="client-status active">Active</div>
                             </div>
                         ))}
+                        {recentTrends.length === 0 && (
+                            <div className="no-data-message">No trend data available</div>
+                        )}
+                    </div>
+
+                    <div className="chart-legend">
+                        <div className="legend-item">
+                            <span className="dot positive"></span> Positive
+                        </div>
+                        <div className="legend-item">
+                            <span className="dot neutral"></span> Neutral
+                        </div>
+                        <div className="legend-item">
+                            <span className="dot negative"></span> Negative
+                        </div>
                     </div>
                 </div>
 
-                {/* Latest Reviews */}
-                <div className="data-card">
-                    <div className="card-header">
-                        <h3 className="card-title">Latest Reviews</h3>
-                        <a href="#" className="view-all-link">View Feed</a>
-                    </div>
-                    <div className="reviews-list">
-                        {[
-                            { user: 'User 1', time: '5m ago' },
-                            { user: 'User 2', time: '10m ago' },
-                            { user: 'User 3', time: '15m ago' },
-                            { user: 'User 4', time: '20m ago' }
-                        ].map((review, idx) => (
-                            <div key={idx} className="review-item">
-                                <div className="review-header">
-                                    <div className="review-user">{review.user}</div>
-                                    <div className="review-stars">⭐⭐⭐⭐⭐</div>
-                                    <div className="review-time">{review.time}</div>
+                {/* Platform Overview */}
+                <div className="chart-card platform-card">
+                    <h3 className="card-title">Platform Overview</h3>
+                    
+                    <div className="platforms-list">
+                        {platformStats.map((platform, index) => (
+                            <div key={index} className="platform-item">
+                                <div className="platform-info">
+                                    <div className="platform-name">{platform.platform}</div>
+                                    <div className="platform-count">{platform.reviews} reviews</div>
                                 </div>
-                                <div className="review-text">
-                                    "Great service, the automated replies are a game changer for our business workflow!"
+                                <div className="platform-score positive">
+                                    {platform.sentiment}%
                                 </div>
                             </div>
                         ))}
+                         {platformStats.length === 0 && (
+                            <div className="no-data-message">No platform data available</div>
+                        )}
                     </div>
                 </div>
             </div>
 
             <style jsx>{`
                 .page-container {
-                    background: #f8fafc;
-                    min-height: 100vh;
                     padding: 40px;
+                    max-width: 1400px;
+                    margin: 0 auto;
                 }
 
                 .page-header {
@@ -314,354 +377,225 @@ export default function Dashboard() {
                 }
 
                 .page-title {
-                    font-size: 36px;
-                    font-weight: 800;
-                    color: #0f172a;
+                    font-size: 28px;
+                    font-weight: 700;
+                    color: #1e293b;
                     margin: 0 0 8px 0;
-                    letter-spacing: -0.025em;
                 }
 
                 .page-subtitle {
-                    font-size: 16px;
-                    color: #64748b;
-                    margin: 0;
-                    font-weight: 500;
-                }
-
-                .loading-message {
-                    font-size: 18px;
-                    color: #475569;
-                    text-align: center;
-                    padding: 48px;
-                    background: white;
-                    border-radius: 16px;
-                    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-                }
-
-                .section {
-                    margin-bottom: 40px;
-                }
-
-                .section-header {
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: flex-end;
-                    margin-bottom: 24px;
-                }
-
-                .section-title {
-                    font-size: 24px;
-                    font-weight: 700;
-                    color: #1e293b;
-                    margin: 0 0 4px 0;
-                }
-
-                .section-subtitle {
-                    font-size: 14px;
+                    font-size: 15px;
                     color: #64748b;
                     margin: 0;
                 }
 
-                .section-actions {
-                    display: flex;
-                    gap: 16px;
-                    align-items: center;
-                }
-
-                .time-select {
-                    padding: 12px 20px;
-                    border: 1px solid #e2e8f0;
-                    border-radius: 12px;
+                .user-badge {
+                    background: #e0e7ff;
+                    color: #4f46e5;
+                    padding: 8px 16px;
+                    border-radius: 20px;
                     font-size: 14px;
                     font-weight: 600;
-                    color: #475569;
-                    background: white;
-                    cursor: pointer;
-                    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-                    transition: all 0.2s;
                 }
 
-                .time-select:hover {
-                    border-color: #cbd5e0;
-                    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-                }
-
-                .download-btn {
-                    padding: 12px 24px;
-                    background: #6366f1;
-                    color: white;
-                    border: none;
-                    border-radius: 12px;
-                    font-size: 14px;
-                    font-weight: 600;
-                    cursor: pointer;
-                    transition: all 0.2s;
-                    box-shadow: 0 4px 6px -1px rgba(99, 102, 241, 0.3);
-                }
-
-                .download-btn:hover {
-                    background: #4f46e5;
-                    transform: translateY(-2px);
-                    box-shadow: 0 6px 8px -1px rgba(99, 102, 241, 0.4);
-                }
-
-                .stats-grid {
+                /* Metrics Grid */
+                .metrics-grid {
                     display: grid;
-                    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+                    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
                     gap: 24px;
+                    margin-bottom: 32px;
                 }
 
-                .stat-card {
+                .metric-card {
                     background: white;
-                    border-radius: 16px;
-                    padding: 28px;
-                    display: flex;
-                    align-items: flex-start;
-                    gap: 24px;
+                    border-radius: 12px;
+                    padding: 24px;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.02), 0 1px 2px rgba(0,0,0,0.04);
                     border: 1px solid #f1f5f9;
-                    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
-                    transition: all 0.3s ease;
-                }
-
-                .stat-card:hover {
-                    transform: translateY(-4px);
-                    box-shadow: 0 12px 24px -4px rgba(0, 0, 0, 0.1), 0 8px 16px -4px rgba(0, 0, 0, 0.04);
-                    border-color: white;
-                }
-
-                .stat-icon-circle {
-                    width: 60px;
-                    height: 60px;
-                    border-radius: 14px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    flex-shrink: 0;
-                    font-size: 28px;
-                }
-
-                .stat-icon-circle.blue {
-                    background: #eff6ff;
-                    color: #3b82f6;
-                    border: 1px solid #dbeafe;
-                }
-
-                .stat-icon-circle.orange {
-                    background: #fff7ed;
-                    color: #f97316;
-                    border: 1px solid #ffedd5;
-                }
-
-                .stat-icon-circle.green {
-                    background: #f0fdf4;
-                    color: #22c55e;
-                    border: 1px solid #dcfce7;
-                }
-
-                .stat-icon-circle.purple {
-                    background: #faf5ff;
-                    color: #a855f7;
-                    border: 1px solid #f3e8ff;
-                }
-
-                .stat-info {
-                    flex: 1;
                     display: flex;
                     flex-direction: column;
                 }
 
-                .stat-change {
-                    font-size: 13px;
-                    font-weight: 700;
-                    margin-bottom: 8px;
-                    display: inline-flex;
-                    align-items: center;
-                    padding: 4px 10px;
-                    background: #f0fdf4;
-                    color: #16a34a;
-                    border-radius: 20px;
-                    width: fit-content;
-                }
-
-                .stat-value {
-                    font-size: 32px;
-                    font-weight: 800;
-                    color: #0f172a;
-                    line-height: 1.2;
-                    margin-bottom: 4px;
-                    letter-spacing: -0.05em;
-                }
-
-                .stat-label {
-                    font-size: 14px;
-                    color: #64748b;
-                    font-weight: 600;
-                }
-
-                .bottom-grid {
-                    display: grid;
-                    grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
-                    gap: 32px;
-                }
-
-                .data-card {
-                    background: white;
-                    border-radius: 16px;
-                    border: 1px solid #f1f5f9;
-                    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
-                    padding: 32px;
-                    height: 100%;
-                }
-
-                .card-header {
+                .metric-header {
                     display: flex;
                     justify-content: space-between;
                     align-items: center;
-                    margin-bottom: 24px;
-                    padding-bottom: 0;
-                    border-bottom: none;
+                    margin-bottom: 16px;
+                }
+
+                .metric-title {
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: #1e293b;
+                }
+
+                .metric-icon {
+                    font-size: 20px;
+                }
+
+                .metric-value {
+                    font-size: 32px;
+                    font-weight: 700;
+                    color: #0f172a;
+                    margin-bottom: 8px;
+                    line-height: 1;
+                }
+
+                .metric-sub {
+                    font-size: 13px;
+                    color: #94a3b8;
+                }
+
+                /* Charts Grid */
+                .charts-grid {
+                    display: grid;
+                    grid-template-columns: 2fr 1fr;
+                    gap: 24px;
+                }
+
+                .chart-card {
+                    background: white;
+                    border-radius: 12px;
+                    padding: 24px;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.02), 0 1px 2px rgba(0,0,0,0.04);
+                    border: 1px solid #f1f5f9;
                 }
 
                 .card-title {
-                    font-size: 20px;
-                    font-weight: 700;
+                    font-size: 16px;
+                    font-weight: 600;
                     color: #1e293b;
-                    margin: 0;
+                    margin: 0 0 24px 0;
                 }
 
-                .view-all-link {
+                /* Trends Chart */
+                .trends-list {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 24px;
+                    margin-bottom: 24px;
+                }
+
+                .trend-item {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 8px;
+                }
+
+                .trend-label {
                     font-size: 14px;
-                    font-weight: 600;
-                    color: #6366f1;
-                    text-decoration: none;
-                    transition: color 0.2s;
+                    font-weight: 500;
+                    color: #475569;
+                }
+
+                .trend-bar-container {
                     display: flex;
                     align-items: center;
-                    gap: 4px;
+                    gap: 12px;
+                    height: 32px;
                 }
 
-                .view-all-link:hover {
-                    color: #4f46e5;
+                .trend-bar {
+                    flex: 1;
+                    height: 100%;
+                    background: #f1f5f9;
+                    border-radius: 6px;
+                    display: flex;
+                    overflow: hidden;
                 }
 
-                .clients-list {
+                .bar-segment {
+                    height: 100%;
+                }
+
+                .bar-segment.positive { background-color: #10b981; }
+                .bar-segment.neutral { background-color: #f59e0b; }
+                .bar-segment.negative { background-color: #ef4444; }
+
+                .trend-value-label {
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: #64748b;
+                    min-width: 32px;
+                    text-align: right;
+                }
+
+                .chart-legend {
+                    display: flex;
+                    justify-content: center;
+                    gap: 24px;
+                    margin-top: 16px;
+                }
+
+                .legend-item {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    font-size: 13px;
+                    color: #64748b;
+                }
+
+                .dot {
+                    width: 10px;
+                    height: 10px;
+                    border-radius: 2px;
+                }
+                .dot.positive { background-color: #10b981; }
+                .dot.neutral { background-color: #f59e0b; }
+                .dot.negative { background-color: #ef4444; }
+
+                /* Platform Overview */
+                .platforms-list {
                     display: flex;
                     flex-direction: column;
                     gap: 16px;
                 }
 
-                .client-item {
+                .platform-item {
                     display: flex;
                     align-items: center;
-                    gap: 20px;
+                    justify-content: space-between;
                     padding: 16px;
-                    border-radius: 12px;
-                    transition: all 0.2s;
-                    border: 1px solid transparent;
-                }
-
-                .client-item:hover {
                     background: #f8fafc;
-                    border-color: #e2e8f0;
+                    border-radius: 8px;
                 }
 
-                .client-avatar {
-                    width: 52px;
-                    height: 52px;
-                    border-radius: 14px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    color: white;
-                    font-size: 22px;
-                    font-weight: 700;
-                    flex-shrink: 0;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                }
-
-                .client-details {
-                    flex: 1;
-                }
-
-                .client-name {
-                    font-size: 16px;
-                    font-weight: 700;
-                    color: #0f172a;
+                .platform-name {
+                    font-size: 15px;
+                    font-weight: 600;
+                    color: #1e293b;
                     margin-bottom: 4px;
                 }
 
-                .client-email {
-                    font-size: 14px;
+                .platform-count {
+                    font-size: 13px;
                     color: #64748b;
                 }
 
-                .client-status {
-                    padding: 6px 16px;
-                    border-radius: 9999px;
-                    font-size: 13px;
-                    font-weight: 600;
-                    letter-spacing: 0.025em;
+                .platform-score {
+                    font-size: 16px;
+                    font-weight: 700;
+                    color: #10b981;
                 }
 
-                .client-status.active {
-                    background: #f0fdf4;
-                    color: #16a34a;
-                    border: 1px solid #dcfce7;
+                .loading-message {
+                    font-size: 16px;
+                    color: #64748b;
+                    text-align: center;
+                    margin-top: 40px;
                 }
-
-                .reviews-list {
-                    display: flex;
-                    flex-direction: column;
-                    gap: 20px;
-                }
-
-                .review-item {
+                
+                .no-data-message {
+                    text-align: center;
+                    color: #94a3b8;
+                    font-size: 14px;
                     padding: 20px;
                     background: #f8fafc;
-                    border-radius: 12px;
-                    border: 1px solid #f1f5f9;
-                    transition: all 0.2s;
-                }
-
-                .review-item:hover {
-                    background: #fff;
-                    border-color: #e2e8f0;
-                    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
-                }
-
-                .review-header {
-                    display: flex;
-                    align-items: center;
-                    gap: 12px;
-                    margin-bottom: 12px;
-                }
-
-                .review-user {
-                    font-size: 15px;
-                    font-weight: 700;
-                    color: #1e293b;
-                }
-
-                .review-stars {
-                    font-size: 14px;
-                    letter-spacing: 2px;
-                }
-
-                .review-time {
-                    font-size: 12px;
-                    color: #94a3b8;
-                    margin-left: auto;
-                    font-weight: 500;
-                }
-
-                .review-text {
-                    font-size: 15px;
-                    color: #475569;
-                    line-height: 1.6;
+                    border-radius: 8px;
                 }
 
                 @media (max-width: 1024px) {
-                    .bottom-grid {
+                    .charts-grid {
                         grid-template-columns: 1fr;
                     }
                 }
@@ -670,30 +604,8 @@ export default function Dashboard() {
                     .page-container {
                         padding: 20px;
                     }
-
-                    .page-header {
-                        flex-direction: column;
-                        gap: 16px;
-                    }
-
-                    .stats-grid {
+                    .metrics-grid {
                         grid-template-columns: 1fr;
-                    }
-
-                    .section-header {
-                        flex-direction: column;
-                        align-items: flex-start;
-                        gap: 16px;
-                    }
-
-                    .section-actions {
-                        width: 100%;
-                    }
-
-                    .time-select,
-                    .download-btn {
-                        flex: 1;
-                        text-align: center;
                     }
                 }
             `}</style>

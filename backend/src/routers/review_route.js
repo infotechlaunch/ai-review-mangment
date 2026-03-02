@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const {
     fetchReviews,
+    fetchReviewsFromPlaces,
+    fetchReviewsFromThirdParty,
     getReviews,
     getReviewById,
     generateAIReply,
@@ -20,6 +22,8 @@ router.use(authenticate);
 
 // Fetch reviews from Google
 router.post('/fetch', authorize(['ADMIN', 'CLIENT_OWNER']), fetchReviews);
+router.post('/fetch-places', authorize(['ADMIN', 'CLIENT_OWNER']), fetchReviewsFromPlaces);
+router.post('/fetch-third-party', authorize(['ADMIN', 'CLIENT_OWNER']), fetchReviewsFromThirdParty);
 
 // Get all reviews with filters
 router.get('/', authorize(['ADMIN', 'CLIENT_OWNER', 'STAFF']), getReviews);

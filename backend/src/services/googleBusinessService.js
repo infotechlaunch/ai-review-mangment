@@ -510,6 +510,187 @@ const deleteGoogleReviewReply = async (accountId, locationId, reviewId, accessTo
     }
 };
 
+/**
+ * Fetch reviews from Google Places API (Alternative for Development Mode)
+ * Returns the 5 most recent reviews for a place
+ * Documentation: https://developers.google.com/maps/documentation/places/web-service/details
+ * 
+ * @param {string} placeId - Google Place ID
+ * @param {string} apiKey - Google Maps API Key
+ * @returns {Promise<object>} Object with formatted reviews array
+ */
+const fetchPlacesReviews = async (placeId, apiKey) => {
+    try {
+        if (!placeId) {
+            throw new Error('Google Place ID is required');
+        }
+        if (!apiKey) {
+            throw new Error('Google Maps API Key is required');
+        }
+
+        const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=reviews,name&key=${apiKey}`;
+
+        console.log(`📡 Fetching reviews from Places API for place: ${placeId}`);
+
+        const response = await axios.get(url);
+
+        if (response.data.status !== 'OK') {
+            throw new Error(`Google Places API Error: ${response.data.status} - ${response.data.error_message || 'Unknown error'}`);
+        }
+
+        const rawReviews = response.data.result.reviews || [];
+        const businessName = response.data.result.name;
+
+        // Format Places API reviews to match the app's review structure
+        const formattedReviews = rawReviews.map(review => ({
+            google_review_id: `places_${placeId}_${review.time}`, // Places API doesn't provide unique review IDs like GBP
+            reviewer: {
+                displayName: review.author_name,
+                profilePhotoUrl: review.profile_photo_url,
+            },
+            reviewer_name: review.author_name,
+            reviewer_photo: review.profile_photo_url,
+            rating: review.rating,
+            review_text: review.text,
+            comment: review.text,
+            review_created_at: new Date(review.time * 1000),
+            review_updated_at: new Date(review.time * 1000),
+            has_reply: false, // Places API doesn't return owner replies
+            reply_text: null,
+            source: 'PLACES_API',
+            business_name: businessName
+        }));
+
+        console.log(`✓ Fetched ${formattedReviews.length} reviews from Places API`);
+
+        return {
+            reviews: formattedReviews,
+            totalReviews: formattedReviews.length,
+            businessName
+        };
+
+    } catch (error) {
+        console.error('Error fetching Places API reviews:', error.message);
+        throw new Error(`Failed to fetch reviews from Places API: ${error.message}`);
+    }
+};
+
+/**
+ * Fetch reviews from SearchAPI (Third-party Google Maps Scraper)
+ * Documentation: https://www.searchapi.io/docs/google-maps-reviews
+ * 
+ * @param {string} placeId - Google Place ID
+ * @param {string} apiKey - SearchAPI API Key
+ * @param {object} options - Optional parameters (sort, rating, etc.)
+ * @returns {Promise<object>} Object with formatted reviews array
+ */
+const fetchReviewsFromSearchApi = async (placeId, apiKey, options = {}) => {
+    try {
+        if (!placeId) {
+            throw new Error('Google Place ID is required');
+        }
+        if (!apiKey) {
+            throw new Error('SearchAPI API Key is required');
+        }
+
+        const {
+            engine = 'google_maps_reviews',
+            sort_by = 'newest',
+            maxPages = 1
+        } = options;
+
+        let allReviews = [];
+        let nextPageToken = null;
+        let pagesFetched = 0;
+
+        do {
+            const params = {
+                engine,
+                place_id: placeId,
+                sort_by
+            };
+
+            if (nextPageToken) {
+                params.next_page_token = nextPageToken;
+            }
+
+            console.log(`📡 Fetching reviews from SearchAPI (page ${pagesFetched + 1}) for place: ${placeId}`);
+
+            const response = await axios.get('https://www.searchapi.io/api/v1/search', { 
+                params,
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`
+                }
+            });
+
+            // SearchAPI returns reviews in different places depending on the engine
+            let rawReviews = [];
+            if (engine === 'google_maps_reviews') {
+                rawReviews = response.data.reviews || [];
+                nextPageToken = response.data.pagination?.next_page_token;
+            } else if (engine === 'google_maps_place') {
+                rawReviews = response.data.review_results?.reviews || [];
+                nextPageToken = null; // Place API usually doesn't have review pagination
+            }
+
+            const formattedReviews = rawReviews.map(review => ({
+                google_review_id: review.review_id || `searchapi_${placeId}_${review.date}`,
+                reviewer: {
+                    displayName: review.user?.name || 'Anonymous',
+                    profilePhotoUrl: review.user?.thumbnail || null,
+                },
+                reviewer_name: review.user?.name || 'Anonymous',
+                reviewer_photo: review.user?.thumbnail || null,
+                rating: review.rating,
+                review_text: review.description || review.text || '',
+                comment: review.description || review.text || '',
+                review_created_at: parseSearchApiDate(review.date),
+                review_updated_at: parseSearchApiDate(review.date),
+                has_reply: false, // SearchAPI might not easily distinguish owner replies in this format
+                reply_text: null,
+                source: 'SEARCHAPI',
+            }));
+
+            allReviews = allReviews.concat(formattedReviews);
+            pagesFetched++;
+
+        } while (nextPageToken && pagesFetched < maxPages);
+
+        console.log(`✓ Fetched ${allReviews.length} reviews from SearchAPI`);
+
+        return {
+            reviews: allReviews,
+            totalReviews: allReviews.length
+        };
+
+    } catch (error) {
+        console.error('Error fetching SearchAPI reviews:', error.response?.data || error.message);
+        throw new Error(`Failed to fetch reviews from SearchAPI: ${error.message}`);
+    }
+};
+
+/**
+ * Simple helper to parse SearchAPI relative dates (e.g., "2 weeks ago")
+ * Note: This is a rough approximation.
+ */
+const parseSearchApiDate = (dateStr) => {
+    if (!dateStr) return new Date();
+    
+    const now = new Date();
+    const num = parseInt(dateStr);
+    if (isNaN(num)) return now;
+
+    if (dateStr.includes('second')) return new Date(now.getTime() - num * 1000);
+    if (dateStr.includes('minute')) return new Date(now.getTime() - num * 60 * 1000);
+    if (dateStr.includes('hour')) return new Date(now.getTime() - num * 60 * 60 * 1000);
+    if (dateStr.includes('day')) return new Date(now.getTime() - num * 24 * 60 * 60 * 1000);
+    if (dateStr.includes('week')) return new Date(now.getTime() - 7 * num * 24 * 60 * 60 * 1000);
+    if (dateStr.includes('month')) return new Date(now.getTime() - 30 * num * 24 * 60 * 60 * 1000);
+    if (dateStr.includes('year')) return new Date(now.getTime() - 365 * num * 24 * 60 * 60 * 1000);
+
+    return now;
+};
+
 // ❌ REMOVED: refreshAccessToken - MUST use controller's refreshTenantAccessToken only
 // All token refresh logic must go through ONE source of truth in the controller
 
@@ -519,5 +700,7 @@ module.exports = {
     batchGetGoogleReviews,
     postReplyToGoogle,
     deleteGoogleReviewReply,
+    fetchPlacesReviews,
+    fetchReviewsFromSearchApi,
     formatReviewData,
 };

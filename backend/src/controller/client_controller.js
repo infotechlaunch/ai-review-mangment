@@ -8,6 +8,9 @@ const {
     deleteGoogleReviewReply
 } = require('../services/googleBusinessService');
 const Tenant = require('../models/Tenant');
+const Review = require('../models/Review');
+const Location = require('../models/Location');
+const { Op } = require('sequelize');
 
 // Import quota cooldown map from google_oauth_controller
 const { quotaCooldowns } = require('./google_oauth_controller');
@@ -27,19 +30,58 @@ const getClientDashboard = async (req, res) => {
         const userSlug = req.user.slug || req.user.tenantSlug;
 
         // Get client configuration
-        const client = await getClientBySlug(userSlug);
+        let client = null;
+        try {
+            client = await getClientBySlug(userSlug);
+        } catch (err) {
+            console.warn(`  ⚠️ Warning: Could not fetch client config from Google Sheet: ${err.message}`);
+        }
 
+        // Always fetch Tenant to get settings
+        const tenant = await Tenant.findOne({ where: { slug: userSlug } });
+        
         if (!client) {
-            return res.status(404).json({
-                success: false,
-                message: 'Client not found'
-            });
+             // Fallback to tenant DB
+             if (tenant) {
+                client = {
+                    slug: tenant.slug,
+                    businessName: tenant.businessName,
+                    gid: null,
+                    sheetTab: null,
+                    settings: tenant.settings // Attach settings to client object for response
+                };
+            } else {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Client not found'
+                });
+            }
+        } else if (tenant) {
+            // If client found from Sheet, attach settings from Tenant DB
+            client.settings = tenant.settings;
         }
 
         if (!client.sheetTab) {
-            return res.status(400).json({
-                success: false,
-                message: 'Client does not have a review sheet configured'
+            // Return empty stats if no sheet configured
+             return res.json({
+                success: true,
+                data: {
+                    client: {
+                        slug: client.slug,
+                        businessName: client.businessName,
+                        packageTier: null,
+                        reviewURL: null,
+                    },
+                    stats: {
+                        totalReviews: 0,
+                        repliedReviews: 0,
+                        pendingReviews: 0,
+                        averageRating: "0.00",
+                        ratingBreakdown: { 5:0, 4:0, 3:0, 2:0, 1:0 },
+                    },
+                    recentReviews: [],
+                },
+                timestamp: new Date().toISOString()
             });
         }
 
@@ -86,8 +128,9 @@ const getClientDashboard = async (req, res) => {
                     averageRating: averageRating.toFixed(2),
                     ratingBreakdown,
                 },
-                recentReviews,
+                reviews: reviews.slice(0, 5) // Recent 5 reviews
             },
+            settings: client.settings || {}, // Include settings from Tenant (if attached to client object or fetched separately)
             timestamp: new Date().toISOString()
         });
 
@@ -106,80 +149,221 @@ const getClientDashboard = async (req, res) => {
  * @route GET /api/client/reviews
  * @access CLIENT_OWNER, STAFF
  */
+const syncReviewsFromSheet = async (client, tenant, location) => {
+    try {
+        console.log(`  🔄 Background Sync: Fetching reviews from tab "${client.sheetTab}"...`);
+        const sheetReviews = await getReviewsByTab(client.sheetTab, client.gid);
+        console.log(`  ✅ Background Sync: Fetched ${sheetReviews.length} reviews from Sheet`);
+
+        const existingReviews = await Review.findAll({
+            where: { tenantId: tenant.id },
+            attributes: ['id', 'review_key', 'google_review_id']
+        });
+        
+        const existingReviewMap = new Map();
+        existingReviews.forEach(r => {
+            if (r.review_key) existingReviewMap.set(r.review_key, r.id);
+            if (r.google_review_id) existingReviewMap.set(r.google_review_id, r.id);
+        });
+
+        const reviewsToUpsert = sheetReviews.map(r => {
+            let createdAt = new Date();
+            if (r.Timestamp) createdAt = new Date(r.Timestamp);
+            else if (r.timestamp) createdAt = new Date(r.timestamp);
+            else if (r.review_created_at) createdAt = new Date(r.review_created_at);
+            
+            if (isNaN(createdAt.getTime())) createdAt = new Date();
+
+            const reviewKey = r.review_key || r.ReviewKey || r.google_review_id || `${(r.reviewer_name || 'anon').replace(/\s+/g, '_')}_${r.rating || 0}`;
+            const googleReviewId = r.google_review_id || r['Review ID'] || reviewKey;
+            const existingId = existingReviewMap.get(reviewKey) || existingReviewMap.get(googleReviewId);
+
+            let ratingVal = parseInt(r.rating || r['Star Rating'] || 0) || 0;
+            if (ratingVal > 5) ratingVal = 5;
+            if (ratingVal < 0) ratingVal = 0;
+
+            return {
+                id: existingId,
+                tenantId: tenant.id,
+                locationId: location.id,
+                review_key: reviewKey, 
+                google_review_id: googleReviewId,
+                reviewer_name: r.reviewer_name || r['Reviewer Name'] || 'Anonymous',
+                rating: ratingVal,
+                review_text: r.review_text || r.Review || '',
+                sentiment: ['Positive', 'Negative', 'Neutral'].includes(r.sentiment) ? r.sentiment : 'Neutral',
+                review_created_at: createdAt,
+                ai_generated_reply: r.ai_generated_reply || r['Auto Reply'],
+                final_caption: r.final_caption || r['Final Caption'],
+                approval_status: r.approval_status || 'pending',
+                approved_at: r.approved_at ? new Date(r.approved_at) : null,
+                posted_to_google: !!r.posted_at
+            };
+        });
+        
+        const processedIds = new Set();
+        const validReviews = [];
+
+        for (const review of reviewsToUpsert) {
+            if (review.rating <= 0) continue;
+            if (processedIds.has(review.google_review_id)) continue;
+            processedIds.add(review.google_review_id);
+            validReviews.push(review);
+        }
+
+        if (validReviews.length > 0) {
+            await Review.bulkCreate(validReviews, {
+                updateOnDuplicate: [
+                    'reviewer_name', 'rating', 'review_text', 'sentiment', 
+                    'ai_generated_reply', 'final_caption', 'approval_status',
+                    'review_created_at', 'review_key'
+                ],
+                conflictAttributes: ['id']
+            });
+            console.log(`  ✅ Background Sync: Synced ${validReviews.length} reviews to Database`);
+        }
+    } catch (error) {
+        console.error('  ❌ Background Sync Failed:', error.message);
+    }
+};
+
 const getClientReviews = async (req, res) => {
     try {
         const { replied, rating, page = 1, limit = 20 } = req.query;
         const userSlug = req.user.slug || req.user.tenantSlug;
 
-        console.log('📋 Client Reviews Request:');
-        console.log('  User:', req.user.email);
-        console.log('  Role:', req.user.role);
-        console.log('  Tenant Slug (from token):', userSlug);
+        console.log('📋 Client Reviews Request:', req.user.email);
 
-        // Get client configuration
-        const client = await getClientBySlug(userSlug);
+        // 1. Get client/tenant configuration
+        let client = null;
+        try {
+            client = await getClientBySlug(userSlug);
+        } catch (err) {
+            console.warn(`  ⚠️ Warning: Could not fetch client config from Google Sheet: ${err.message}`);
+        }
 
+        const tenant = await Tenant.findOne({ where: { slug: userSlug } });
+
+        if (!tenant) {
+            return res.status(404).json({ success: false, message: 'Tenant not found in database' });
+        }
+
+        // If client config from sheet is missing, construct a basic one from tenant
         if (!client) {
-            console.error('❌ Client not found for slug:', userSlug);
-            return res.status(404).json({
-                success: false,
-                message: 'Client not found'
+            client = {
+                slug: tenant.slug,
+                businessName: tenant.businessName,
+                sheetTab: null, // No sync possible without this
+            };
+        }
+
+        // 2. Ensure a default Location exists
+        let location = await Location.findOne({ where: { tenantId: tenant.id } });
+        if (!location) {
+            console.log('  Creating default location for tenant...');
+            location = await Location.create({
+                tenantId: tenant.id,
+                name: tenant.businessName || 'Main Location',
+                slug: userSlug || 'main',
+                isActive: true
             });
         }
 
-        console.log('  ✅ Client found:', client.businessName);
-        console.log('  Sheet Tab:', client.sheetTab);
-        console.log('  GID:', client.gid);
-
-        if (!client.sheetTab) {
-            return res.status(400).json({
-                success: false,
-                message: 'Client does not have a review sheet configured'
-            });
+        // 3. Check for existing data in DB
+        const whereClause = { tenantId: tenant.id };
+        if (replied === 'true') {
+            whereClause[Op.or] = [
+                { final_caption: { [Op.ne]: null } }, 
+                { ai_generated_reply: { [Op.ne]: null } }
+            ];
+        } else if (replied === 'false') {
+             whereClause.final_caption = null;
+             whereClause.ai_generated_reply = null;
         }
 
-        // Get all reviews for this client
-        console.log(`  Fetching reviews from tab "${client.sheetTab}" with GID "${client.gid}"...`);
-        let reviews = await getReviewsByTab(client.sheetTab, client.gid);
+        if (rating) {
+            whereClause.rating = parseInt(rating);
+        }
 
-        console.log('  ✅ Fetched', reviews.length, 'reviews');
+        // Fetch current DB data
+        const { count, rows } = await Review.findAndCountAll({
+            where: whereClause,
+            limit: parseInt(limit),
+            offset: (parseInt(page) - 1) * parseInt(limit),
+            order: [['review_created_at', 'DESC']]
+        });
 
-        // Add client info to reviews
-        reviews = reviews.map(review => ({
-            ...review,
-            businessName: client.businessName,
-            slug: client.slug,
-        }));
-
-        // Apply filters
-        const filtered = filterReviews(reviews, { replied, rating });
-
-        // Apply pagination
-        const result = paginateReviews(filtered, page, limit);
-
-        // Include client info in response for dashboard
-        result.client = {
-            slug: client.slug,
-            businessName: client.businessName,
-            reviewURL: client.reviewURL,
-            fbPage: client.fbPage,
-            igHandle: client.igHandle,
+        const responseData = {
+             reviews: rows,
+             pagination: {
+                 total: count,
+                 page: parseInt(page),
+                 limit: parseInt(limit),
+                 totalPages: Math.ceil(count / parseInt(limit))
+             },
+             client: {
+                slug: client.slug,
+                businessName: client.businessName,
+                reviewURL: client.reviewURL,
+                fbPage: client.fbPage,
+                igHandle: client.igHandle,
+            }
         };
 
-        res.json({
-            success: true,
-            data: result,
-            timestamp: new Date().toISOString()
-        });
+        // 4. Smart Response Strategy
+        if (count > 0) {
+            // Case A: Data exists. Return FAST, sync in BACKGROUND.
+            console.log('  ⚡ Returning cached data immediately');
+            res.json({
+                success: true,
+                data: responseData,
+                timestamp: new Date().toISOString()
+            });
+            
+            // Trigger background sync (don't await) if configured
+            if (client.sheetTab) {
+                syncReviewsFromSheet(client, tenant, location);
+            } else {
+                console.log('  ⚠️ Skipping sync: Sheet tab not configured');
+            }
+        } else {
+            // Case B: No data. Must sync FIRST, then return.
+            if (client.sheetTab) {
+                console.log('  ⏳ No local data, syncing first...');
+                await syncReviewsFromSheet(client, tenant, location);
+            } else {
+                console.log('  ⚠️ No local data and no sheet configured. Returning empty.');
+            }
+            
+            // Re-fetch after sync
+            const freshData = await Review.findAndCountAll({
+                where: whereClause,
+                limit: parseInt(limit),
+                offset: (parseInt(page) - 1) * parseInt(limit),
+                order: [['review_created_at', 'DESC']]
+            });
+            
+            responseData.reviews = freshData.rows;
+            responseData.pagination.total = freshData.count;
+            responseData.pagination.totalPages = Math.ceil(freshData.count / parseInt(limit));
+            
+            res.json({
+                success: true,
+                data: responseData,
+                timestamp: new Date().toISOString()
+            });
+        }
 
     } catch (error) {
-        console.error('❌ Error getting client reviews:', error);
-        console.error('Error stack:', error.stack);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to get client reviews',
-            error: error.message
-        });
+        console.error('❌ Error getting/syncing client reviews:', error);
+        // Ensure response is sent if error occurs before any response
+        if (!res.headersSent) {
+            res.status(500).json({
+                success: false,
+                message: 'Failed to get client reviews',
+                error: error.message
+            });
+        }
     }
 };
 
@@ -525,12 +709,98 @@ const batchFetchGoogleReviews = async (req, res) => {
     }
 };
 
+/**
+ * Get client settings
+ * @route GET /api/client/settings
+ * @access CLIENT_OWNER, STAFF
+ */
+const getClientSettings = async (req, res) => {
+    try {
+        const userSlug = req.user.slug || req.user.tenantSlug;
+        const tenantId = req.user.tenantId || req.user.tenant;
+
+        console.log(`🔍 Getting settings for: ${userSlug || tenantId}`);
+
+        let tenant;
+        if (userSlug) {
+            tenant = await Tenant.findOne({ where: { slug: userSlug } });
+        } else if (tenantId) {
+            tenant = await Tenant.findByPk(tenantId);
+        }
+
+        if (!tenant) {
+            console.error('❌ Tenant not found for settings request', { userSlug, tenantId });
+            return res.status(404).json({ success: false, message: 'Tenant not found' });
+        }
+
+        res.json({
+            success: true,
+            settings: tenant.settings || {},
+            timestamp: new Date().toISOString()
+        });
+
+    } catch (error) {
+        console.error('❌ Error getting client settings:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Server error getting settings',
+            error: error.message 
+        });
+    }
+};
+
+/**
+ * Update Client Settings
+ * Updates the 'settings' JSONB column in the Tenant model
+ * @route PUT /api/client/settings
+ * @access CLIENT_OWNER
+ */
+const updateClientSettings = async (req, res) => {
+    try {
+        const { autoApproval, tone, automation, autoPost } = req.body;
+        const userSlug = req.user.slug || req.user.tenantSlug;
+
+        // Find the Tenant
+        const tenant = await Tenant.findOne({ where: { slug: userSlug } });
+
+        if (!tenant) {
+            return res.status(404).json({ success: false, message: 'Tenant not found' });
+        }
+
+        // Merge existing settings with updates
+        const currentSettings = tenant.settings || {};
+        const newSettings = {
+            ...currentSettings,
+            ...(autoApproval && { autoApproval }),
+            ...(tone && { tone }),
+            ...(automation && { automation }),
+            ...(autoPost && { autoPost })
+        };
+
+        // Update the tenant
+        tenant.settings = newSettings;
+        await tenant.save();
+
+        res.json({
+            success: true,
+            settings: tenant.settings,
+            message: 'Settings updated successfully'
+        });
+
+    } catch (error) {
+        console.error('Error updating client settings:', error);
+        res.status(500).json({ success: false, message: 'Server error updating settings' });
+    }
+};
+
 module.exports = {
     getClientDashboard,
     getClientReviews,
+    getClientSettings,
     fetchGoogleBusinessReviews,
     getSpecificGoogleReview,
     replyToGoogleReview,
     deleteGoogleReply,
     batchFetchGoogleReviews,
+    updateClientSettings
 };
