@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useGoogleConnection } from '../../hooks/useGoogleConnection'
 import ConnectionStatusBanner from '../common/ConnectionStatusBanner'
 import './common.css'
+import api from '../../utils/api'
 
 // CRITICAL: Cooldown persistence key
 const COOLDOWN_STORAGE_KEY = 'google_api_cooldown_until';
@@ -94,7 +95,7 @@ export default function Settings() {
         
         try {
             const token = localStorage.getItem('token');
-            const response = await fetch('http://localhost:4000/api/google-oauth/sync-locations', {
+            const response = await fetch(`${api.API_BASE_URL}/api/google-oauth/sync-locations`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -156,7 +157,7 @@ export default function Settings() {
         try {
             setIsVerifyingAccount(true);
             const token = localStorage.getItem('token');
-            const response = await fetch('http://localhost:4000/api/google-oauth/verify-business-account', {
+            const response = await fetch(`${api.API_BASE_URL}/api/google-oauth/verify-business-account`, {
                 method: 'GET',
                 headers: {
                     'Content-Type': 'application/json',
@@ -282,7 +283,7 @@ export default function Settings() {
     const handleConnectGoogle = async () => {
         try {
             const token = localStorage.getItem('token');
-            const response = await fetch('http://localhost:4000/api/google-oauth/connect', {
+            const response = await fetch(`${api.API_BASE_URL}/api/google-oauth/connect`, {
                 method: 'GET',
                 headers: {
                     'Content-Type': 'application/json',
@@ -310,7 +311,7 @@ export default function Settings() {
 
         try {
             const token = localStorage.getItem('token');
-            const response = await fetch('http://localhost:4000/api/google-oauth/disconnect', {
+            const response = await fetch(`${api.API_BASE_URL}/api/google-oauth/disconnect`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -347,7 +348,7 @@ export default function Settings() {
         const fetchSettings = async () => {
             try {
                 const token = localStorage.getItem('token');
-                const response = await fetch('http://localhost:4000/api/client/settings', {
+                const response = await fetch(`${api.API_BASE_URL}/api/client/settings`, {
                     headers: {
                         'Authorization': `Bearer ${token}`
                     }
@@ -411,7 +412,7 @@ export default function Settings() {
                 }
             };
 
-            const response = await fetch('http://localhost:4000/api/client/settings', {
+            const response = await fetch(`${api.API_BASE_URL}/api/client/settings`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -625,7 +626,7 @@ export default function Settings() {
                                                         
                                                         try {
                                                             const token = localStorage.getItem('token');
-                                                            const response = await fetch('http://localhost:4000/api/onboarding/update-place-id', {
+                                                            const response = await fetch(`${api.API_BASE_URL}/api/onboarding/update-place-id`, {
                                                                 method: 'POST',
                                                                 headers: {
                                                                     'Content-Type': 'application/json',

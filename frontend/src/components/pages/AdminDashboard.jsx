@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './AdminDashboard.css';
 import './common.css';
+import api from '../../utils/api';
 
 const AdminDashboard = () => {
   const [sheetData, setSheetData] = useState([]);
@@ -8,7 +9,7 @@ const AdminDashboard = () => {
   const [error, setError] = useState(null);
 
   // Backend API URL
-  const API_URL = 'http://localhost:4000';
+  const API_URL = api.API_BASE_URL;
 
   useEffect(() => {
     fetchSheetData();
@@ -191,7 +192,9 @@ const AdminDashboard = () => {
               {sheetData.map((row, rowIndex) => (
                 <tr key={rowIndex}>
                   {Object.values(row).map((cell, cellIndex) => (
-                    <td key={cellIndex}>{cell}</td>
+                    <td key={cellIndex}>
+                      {typeof cell === 'object' && cell !== null ? JSON.stringify(cell) : String(cell)}
+                    </td>
                   ))}
                 </tr>
               ))}

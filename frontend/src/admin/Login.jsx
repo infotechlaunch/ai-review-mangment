@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
+import api from '../utils/api'
 
 export default function Login() {
   const [email, setEmail] = useState('')
@@ -18,9 +19,7 @@ export default function Login() {
     setLoading(true)
 
     try {
-        // Build the API URL - handling development environment
-        // Assuming your backend is running on port 4000 based on previous context
-        const response = await fetch('http://localhost:4000/api/admin/login', {
+        const response = await fetch(`${api.API_BASE_URL}/api/auth/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email, password })
@@ -34,8 +33,8 @@ export default function Login() {
 
         // Store auth data
         localStorage.setItem('token', data.token)
-        localStorage.setItem('userEmail', data.admin.email)
-        localStorage.setItem('userRole', 'admin')
+        localStorage.setItem('userEmail', data.email || (data.user && data.user.email))
+        localStorage.setItem('userRole', data.role || (data.user && data.user.role))
 
         // Redirect
         navigate(from, { replace: true })

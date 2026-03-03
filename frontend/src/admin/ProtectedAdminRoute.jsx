@@ -9,6 +9,9 @@ export default function ProtectedAdminRoute({ children }) {
 
     // If not authenticated, redirect to admin login
     if (!isAuth) {
+        if (location.pathname === '/admin/login') {
+            return children
+        }
         return <Navigate to="/admin/login" state={{ from: location }} replace />
     }
 

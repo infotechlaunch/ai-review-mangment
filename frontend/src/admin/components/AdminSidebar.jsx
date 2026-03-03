@@ -96,7 +96,7 @@ export default function AdminSidebar() {
             </aside>
 
             {/* Inline Styles for Custom Scrollbar */}
-            <style jsx global>{`
+            <style>{`
                 .sidebar-scroll {
                     scrollbar-width: thin;
                     scrollbar-color: rgba(100, 116, 139, 0.5) transparent;

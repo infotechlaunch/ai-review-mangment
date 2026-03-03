@@ -362,7 +362,7 @@ export default function Dashboard() {
                 </div>
             </div>
 
-            <style jsx>{`
+            <style>{`
                 .page-container {
                     padding: 40px;
                     max-width: 1400px;

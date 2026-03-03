@@ -13,7 +13,7 @@ const routePrefetchMap = {
     '/sentiment-trend': () => import('../components/pages/sentimentTrend'),
     '/pros-cons': () => import('../components/pages/prosCons'),
     '/billing': () => import('../components/pages/Billing'),
-    '/admin': () => import('../components/pages/AdminDashboard')
+    '/admin': () => import('../admin/pages/Dashboard')
 }
 
 // Prefetch a route

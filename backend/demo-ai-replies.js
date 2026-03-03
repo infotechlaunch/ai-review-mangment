@@ -5,7 +5,7 @@
 
 const axios = require('axios');
 
-const BASE_URL = 'http://localhost:4000';
+const BASE_URL = 'https://ai-review-mangment-1.onrender.com';
 
 const colors = {
     reset: '\x1b[0m',

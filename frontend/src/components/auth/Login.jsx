@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import './Login.css';
 import logo from "../../assets/logo.svg";
+import api from '../../utils/api';
 
 
 const Login = () => {
@@ -88,7 +89,7 @@ const Login = () => {
           return;
         }
 
-        const response = await fetch('http://localhost:4000/api/auth/register/client', {
+        const response = await fetch(`${api.API_BASE_URL}/api/auth/register/client`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -126,7 +127,7 @@ const Login = () => {
         }
       } else {
         // Login
-        const response = await fetch('http://localhost:4000/api/auth/login', {
+        const response = await fetch(`${api.API_BASE_URL}/api/auth/login`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -179,7 +180,7 @@ const Login = () => {
   const handleOAuthLogin = (provider) => {
     // Redirect to Google OAuth
     if (provider === 'Google') {
-      window.location.href = 'http://localhost:4000/api/auth/google';
+      window.location.href = `${api.API_BASE_URL}/api/auth/google`;
     } else {
       console.log(`${provider} login not yet implemented`);
       setError(`${provider} login is not yet available`);

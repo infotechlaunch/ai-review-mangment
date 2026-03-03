@@ -1,8 +1,14 @@
 import React, { lazy, Suspense, useEffect } from 'react'
 import { Routes, Route, useLocation, Navigate } from 'react-router-dom'
+import ProtectedAdminRoute from './admin/ProtectedAdminRoute'
+import ProtectedRoute from './components/auth/ProtectedRoute'
+import AdminLayout from './admin/Layout/AdminLayout'
+import AdminLogin from './admin/Login'
+import AdminDashboardPage from './admin/pages/Dashboard'
 import SkeletonLoader from './components/common/SkeletonLoader'
 import { usePrefetchRoutes, prefetchAllCommonRoutes } from './utils/routePrefetch'
 import Profile from './components/pages/profile'
+
 // Lazy load all components with preload hints
 const Dashboard = lazy(() => import(/* webpackChunkName: "dashboard", webpackPrefetch: true */ './components/pages/dashboard'))
 const Reviews = lazy(() => import(/* webpackChunkName: "reviews", webpackPrefetch: true */ './components/pages/reviews'))
@@ -18,12 +24,7 @@ const SocialShare = lazy(() => import(/* webpackChunkName: "social-share" */ './
 const Login = lazy(() => import(/* webpackChunkName: "login" */ './components/auth/Login'))
 const BusinessSetup = lazy(() => import(/* webpackChunkName: "onboarding" */ './components/onboarding/BusinessSetup'))
 const OnboardingSuccess = lazy(() => import(/* webpackChunkName: "onboarding-success" */ './components/onboarding/OnboardingSuccess'))
-const AdminLayout = lazy(() => import(/* webpackChunkName: "admin-layout" */ './admin/Layout/AdminLayout'))
-const AdminLogin = lazy(() => import(/* webpackChunkName: "admin-login" */ './admin/Login'))
-const ProtectedAdminRoute = lazy(() => import(/* webpackChunkName: "admin-protect" */ './admin/ProtectedAdminRoute'))
 
-
-const AdminDashboardPage = lazy(() => import(/* webpackChunkName: "admin-dashboard" */ './admin/pages/Dashboard'))
 const Clients = lazy(() => import(/* webpackChunkName: "admin-clients" */ './admin/pages/Clients'))
 const ClientDetail = lazy(() => import(/* webpackChunkName: "admin-client-detail" */ './admin/pages/ClientDetail'))
 const AdminReviews = lazy(() => import(/* webpackChunkName: "admin-reviews" */ './admin/pages/Reviews'))
@@ -85,18 +86,20 @@ export default function AppRoute() {
                     <Route path="settings" element={<AdminSettings />} />
                     <Route index element={<Navigate to="dashboard" replace />} />
                 </Route>
-                <Route path="/" element={<Dashboard />} />
-                <Route path="/reviews" element={<Reviews />} />
-                <Route path="/analytics" element={<Analytics />} />
-                <Route path="/sentiment-map" element={<SentimentMap />} />
-                <Route path="/word-cloud" element={<WordCloud />} />
-                <Route path="/industry-comparison" element={<IndustryComparison />} />
-                <Route path="/sentiment-trend" element={<SentimentTrend />} />
-                <Route path="/pros-cons" element={<ProsCons />} />
-                <Route path="/settings" element={<Settings />} />
-                <Route path="/billing" element={<Billing />} />
-                <Route path="/social-share" element={<SocialShare />} />
-                <Route path='/Profile' element={<Profile/>}/>
+                
+                {/* Client Protected Routes */}
+                <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+                <Route path="/reviews" element={<ProtectedRoute><Reviews /></ProtectedRoute>} />
+                <Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
+                <Route path="/sentiment-map" element={<ProtectedRoute><SentimentMap /></ProtectedRoute>} />
+                <Route path="/word-cloud" element={<ProtectedRoute><WordCloud /></ProtectedRoute>} />
+                <Route path="/industry-comparison" element={<ProtectedRoute><IndustryComparison /></ProtectedRoute>} />
+                <Route path="/sentiment-trend" element={<ProtectedRoute><SentimentTrend /></ProtectedRoute>} />
+                <Route path="/pros-cons" element={<ProtectedRoute><ProsCons /></ProtectedRoute>} />
+                <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+                <Route path="/billing" element={<ProtectedRoute><Billing /></ProtectedRoute>} />
+                <Route path="/social-share" element={<ProtectedRoute><SocialShare /></ProtectedRoute>} />
+                <Route path='/Profile' element={<ProtectedRoute><Profile /></ProtectedRoute>} />
             </Routes>
         </Suspense>
     )

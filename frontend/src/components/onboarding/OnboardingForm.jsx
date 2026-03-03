@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import './BusinessSetup.css'; // Re-use existing onboarding classes
+import './BusinessSetup.css'; 
+import api from '../../utils/api';
 
 const OnboardingForm = () => {
     const [formData, setFormData] = useState({
@@ -31,7 +32,7 @@ const OnboardingForm = () => {
 
         try {
             // Send data to Node.js backend
-            const response = await fetch('http://localhost:4000/api/onboarding/submit', {
+            const response = await fetch(`${api.API_BASE_URL}/api/onboarding/submit`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
