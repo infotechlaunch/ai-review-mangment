@@ -43,11 +43,12 @@ const createCheckoutSession = async (req, res) => {
         }
 
         // Build customer_email / customer param for Checkout
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
         const sessionParams = {
             mode: 'subscription',
             line_items: [{ price: priceId, quantity: 1 }],
-            success_url: `${process.env.FRONTEND_URL}/billing?session_id={CHECKOUT_SESSION_ID}&status=success`,
-            cancel_url:  `${process.env.FRONTEND_URL}/billing?status=canceled`,
+            success_url: `${frontendUrl}/billing?session_id={CHECKOUT_SESSION_ID}&status=success`,
+            cancel_url:  `${frontendUrl}/billing?status=canceled`,
             metadata: {
                 userId: user.id,
                 plan: plan.toLowerCase(),
@@ -280,10 +281,10 @@ const createPortalSession = async (req, res) => {
             });
         }
 
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
         const portalSession = await stripe.billingPortal.sessions.create({
             customer: user.stripeCustomerId,
-            return_url: process.env.STRIPE_CUSTOMER_PORTAL_RETURN_URL ||
-                        `${process.env.FRONTEND_URL}/billing`,
+            return_url: process.env.STRIPE_CUSTOMER_PORTAL_RETURN_URL || `${frontendUrl}/billing`,
         });
 
         res.json({

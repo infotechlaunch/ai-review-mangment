@@ -10,12 +10,27 @@ const cors = require('cors');
 const app = express();
 const PORT = process.env.PORT || 4000;
 
+// ── CORS must come first so all routes (including /api/payments) include the header
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173')
+    .split(',')
+    .map((o) => o.trim());
+
+app.use(cors({
+    origin: (origin, callback) => {
+        // Allow requests with no origin (curl, Postman, Stripe webhooks)
+        if (!origin || allowedOrigins.includes(origin)) {
+            return callback(null, true);
+        }
+        callback(new Error(`CORS: origin ${origin} not allowed`));
+    },
+    credentials: true,
+}));
+
 // ── Payment router must be mounted BEFORE express.json() so the webhook route
 // can apply its own express.raw() body parser for Stripe signature verification.
 app.use('/api/payments', require('./src/routers/payment_route'));
 
 // Middleware
-app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

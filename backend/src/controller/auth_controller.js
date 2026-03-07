@@ -1,8 +1,8 @@
+const { google } = require('googleapis');
 const User = require('../models/User');
 const Tenant = require('../models/Tenant');
 const { generateToken } = require('../config/jwt');
 const { sequelize } = require('../config/database');
-const { initiateOAuthFlow, handleOAuthCallback } = require('./google_oauth_controller');
 
 /**
  * Authentication Controller
@@ -248,10 +248,124 @@ const verifyTokenEndpoint = async (req, res) => {
     }
 };
 
+/**
+ * Google Sign-In OAuth – initiate
+ * @route GET /api/auth/google
+ */
+const googleLogin = (req, res) => {
+    try {
+        const oauth2Client = new google.auth.OAuth2(
+            process.env.GOOGLE_CLIENT_ID,
+            process.env.GOOGLE_CLIENT_SECRET,
+            process.env.GOOGLE_LOGIN_REDIRECT_URI || 'http://localhost:4000/api/auth/google/callback'
+        );
+
+        const authUrl = oauth2Client.generateAuthUrl({
+            access_type: 'offline',
+            scope: ['openid', 'profile', 'email'],
+            prompt: 'select_account',
+        });
+
+        res.redirect(authUrl);
+    } catch (error) {
+        console.error('Google login initiation error:', error);
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+        res.redirect(`${frontendUrl}/login?error=${encodeURIComponent('Failed to initiate Google login')}`);
+    }
+};
+
+/**
+ * Google Sign-In OAuth – callback
+ * @route GET /api/auth/google/callback
+ */
+const googleCallback = async (req, res) => {
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    try {
+        const { code, error } = req.query;
+
+        if (error) {
+            return res.redirect(`${frontendUrl}/login?error=${encodeURIComponent(error)}`);
+        }
+        if (!code) {
+            return res.redirect(`${frontendUrl}/login?error=${encodeURIComponent('Authorization code missing')}`);
+        }
+
+        const oauth2Client = new google.auth.OAuth2(
+            process.env.GOOGLE_CLIENT_ID,
+            process.env.GOOGLE_CLIENT_SECRET,
+            process.env.GOOGLE_LOGIN_REDIRECT_URI || 'http://localhost:4000/api/auth/google/callback'
+        );
+
+        const { tokens } = await oauth2Client.getToken(code);
+        oauth2Client.setCredentials(tokens);
+
+        // Fetch Google profile
+        const oauth2Api = google.oauth2({ version: 'v2', auth: oauth2Client });
+        const { data: profile } = await oauth2Api.userinfo.get();
+
+        if (!profile.email) {
+            return res.redirect(`${frontendUrl}/login?error=${encodeURIComponent('Could not get email from Google')}`);
+        }
+
+        // Find existing user
+        const user = await User.findOne({
+            where: { email: profile.email.toLowerCase() },
+            include: [{ model: Tenant, as: 'tenant', attributes: ['slug', 'businessName', 'isActive', 'gbp_initialSyncDone', 'social_profiles'] }]
+        });
+
+        if (user) {
+            if (!user.isActive) {
+                return res.redirect(`${frontendUrl}/login?error=${encodeURIComponent('Your account has been deactivated. Please contact support.')}`);
+            }
+
+            const token = generateToken({
+                userId: user.id,
+                email: user.email,
+                role: user.role,
+                tenant: user.tenantId,
+                slug: user.tenant ? user.tenant.slug : null
+            });
+
+            const data = {
+                token,
+                role: user.role,
+                email: user.email,
+                userName: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
+                isOnboarded: !!(
+                    (user.tenant && user.tenant.gbp_initialSyncDone) ||
+                    (user.tenant && user.tenant.social_profiles && user.tenant.social_profiles.placeId)
+                )
+            };
+
+            if (user.tenantId && user.tenant) {
+                data.tenantId = user.tenantId;
+                data.tenantSlug = user.tenant.slug;
+                data.businessName = user.tenant.businessName;
+            }
+
+            const encodedData = encodeURIComponent(JSON.stringify(data));
+            return res.redirect(`${frontendUrl}/login?google_auth=success&data=${encodedData}`);
+        }
+
+        // New user – redirect to sign-up with prefilled data
+        const signupData = {
+            email: profile.email,
+            firstName: profile.given_name || '',
+            lastName: profile.family_name || '',
+        };
+        const encodedData = encodeURIComponent(JSON.stringify(signupData));
+        return res.redirect(`${frontendUrl}/login?google_auth=signup&data=${encodedData}`);
+
+    } catch (error) {
+        console.error('Google callback error:', error);
+        return res.redirect(`${frontendUrl}/login?error=${encodeURIComponent('Google login failed. Please try again.')}`);
+    }
+};
+
 module.exports = {
     login,
     registerClientOwner,
     verifyTokenEndpoint,
-    googleLogin: initiateOAuthFlow,
-    googleCallback: handleOAuthCallback
+    googleLogin,
+    googleCallback
 };
