@@ -77,7 +77,7 @@ const handle_setting=()=>{
     <nav className="navbar">
       <div className="navbar-container">
         <div className="navbar-brand">
-          <h2>AI Review Management</h2>
+          <h2>Auto Review</h2>
         </div>
       
         <div className="navbar-profile">

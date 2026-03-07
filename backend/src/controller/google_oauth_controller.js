@@ -260,10 +260,11 @@ async function fetchAndSaveLocations(tenant, oauth2Client, accountId) {
         // Get existing locations from database
         const existingLocations = await Location.findAll({
             where: { tenantId: tenant.id },
-            attributes: ['googleLocationId']
         });
 
-        const existingLocationIds = new Set(existingLocations.map(l => l.googleLocationId));
+        const existingByGoogleId = new Map(existingLocations.filter(l => l.googleLocationId).map(l => [l.googleLocationId, l]));
+        // Locations that belong to this tenant but have no googleLocationId yet
+        const locationWithNoGoogleId = existingLocations.find(l => !l.googleLocationId) || null;
 
         let savedCount = 0;
         let skippedCount = 0;
@@ -271,9 +272,19 @@ async function fetchAndSaveLocations(tenant, oauth2Client, accountId) {
         // CRITICAL: Process locations SERIALLY with delays, NOT in parallel
         for (const location of locations) {
             const locationId = location.name;
+            const locationTitle = location.title || 'Unnamed Location';
+            const address = location.storefrontAddress
+                ? `${location.storefrontAddress.addressLines?.[0] || ''}, ${location.storefrontAddress.locality || ''}`
+                : null;
 
-            if (existingLocationIds.has(locationId)) {
-                console.log(`  ⏩ Location already exists: ${location.title}`);
+            if (existingByGoogleId.has(locationId)) {
+                console.log(`  ⏩ Location already exists: ${locationTitle}`);
+                // Ensure googleAccountId is populated even on existing records
+                const existing = existingByGoogleId.get(locationId);
+                if (!existing.googleAccountId) {
+                    existing.googleAccountId = accountId;
+                    await existing.save();
+                }
                 skippedCount++;
                 continue;
             }
@@ -281,17 +292,31 @@ async function fetchAndSaveLocations(tenant, oauth2Client, accountId) {
             // Add delay between operations
             await sleep(API_CALL_DELAY);
 
-            await Location.create({
-                tenantId: tenant.id,
-                googleLocationId: locationId,
-                locationName: location.title || 'Unnamed Location',
-                address: location.storefrontAddress ?
-                    `${location.storefrontAddress.addressLines?.[0] || ''}, ${location.storefrontAddress.locality || ''}` :
-                    null,
-                isActive: true,
-            });
-
-            console.log(`  ✅ Saved new location: ${location.title}`);
+            if (locationWithNoGoogleId) {
+                // Update the existing record that was created without a Google location ID
+                locationWithNoGoogleId.googleLocationId = locationId;
+                locationWithNoGoogleId.googleAccountId = accountId;
+                if (!locationWithNoGoogleId.name || locationWithNoGoogleId.name === 'Default') {
+                    locationWithNoGoogleId.name = locationTitle;
+                }
+                if (address) locationWithNoGoogleId.address = address;
+                await locationWithNoGoogleId.save();
+                console.log(`  ✅ Updated existing location with Google ID: ${locationTitle}`);
+            } else {
+                // Create a brand new location record
+                const baseSlug = locationTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'location';
+                const uniqueSlug = `${baseSlug}-${Date.now()}`;
+                await Location.create({
+                    tenantId: tenant.id,
+                    googleLocationId: locationId,
+                    googleAccountId: accountId,
+                    name: locationTitle,
+                    slug: uniqueSlug,
+                    address,
+                    isActive: true,
+                });
+                console.log(`  ✅ Saved new location: ${locationTitle}`);
+            }
             savedCount++;
         }
 
@@ -1237,4 +1262,8 @@ module.exports = {
     // Export quota cooldown map for other controllers
     quotaCooldowns,
     QUOTA_COOLDOWN_DURATION,
+    // Export helpers for review controller to resolve missing Google IDs
+    getGoogleAccountId,
+    getOAuth2Client,
+    fetchAndSaveLocations,
 };

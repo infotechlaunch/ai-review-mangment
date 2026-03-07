@@ -1,5 +1,42 @@
 /* Common Mobile Styles for All Pages */
 
+/* ── Skeleton / shimmer loader ─────────────────────────────────────────────── */
+@keyframes skeleton-shimmer {
+    0%   { background-position: -600px 0; }
+    100% { background-position:  600px 0; }
+}
+
+.skeleton {
+    background: linear-gradient(
+        90deg,
+        var(--bg-tertiary) 25%,
+        var(--hover-bg)    50%,
+        var(--bg-tertiary) 75%
+    );
+    background-size: 1200px 100%;
+    animation: skeleton-shimmer 1.4s ease-in-out infinite;
+    border-radius: 6px;
+}
+
+.skeleton-card {
+    background-color: var(--card-bg);
+    border-radius: 12px;
+    padding: 20px;
+    border: 1px solid var(--border-color);
+}
+
+.skeleton-line {
+    height: 14px;
+    margin-bottom: 10px;
+    border-radius: 4px;
+}
+
+.skeleton-title  { height: 20px; width: 50%; margin-bottom: 12px; }
+.skeleton-value  { height: 36px; width: 60%; margin-bottom: 8px; }
+.skeleton-sub    { height: 12px; width: 75%; }
+.skeleton-row    { height: 56px; border-radius: 8px; margin-bottom: 12px; }
+/* ─────────────────────────────────────────────────────────────────────────── */
+
 /* Visualization Pages (Sentiment Map, Word Cloud, Trends, etc.) */
 .visualization-container {
     width: 100%;

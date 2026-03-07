@@ -105,6 +105,41 @@ const Review = sequelize.define('Review', {
     google_reply_id: {
         type: DataTypes.STRING,
     },
+    // Social Media Posting
+    facebook_post_url: {
+        type: DataTypes.STRING,
+        allowNull: true,
+    },
+    instagram_post_url: {
+        type: DataTypes.STRING,
+        allowNull: true,
+    },
+    social_posted_at: {
+        type: DataTypes.DATE,
+        allowNull: true,
+    },
+    social_caption: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+    },
+    // AI Analysis (from analyzeAndGenerateReply)
+    sentiment_score: {
+        type: DataTypes.FLOAT,
+        allowNull: true,
+        defaultValue: 0,
+    },
+    emotion_primary: {
+        type: DataTypes.STRING(50),
+        allowNull: true,
+    },
+    topic_primary: {
+        type: DataTypes.STRING(50),
+        allowNull: true,
+    },
+    is_auto_approved: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+    },
 }, {
     timestamps: true,
     indexes: [

@@ -31,7 +31,7 @@ const login = async (req, res) => {
         // Find user by email
         const user = await User.findOne({ 
             where: { email: email.toLowerCase() },
-            include: [{ model: Tenant, as: 'tenant', attributes: ['slug', 'businessName', 'isActive'] }]
+            include: [{ model: Tenant, as: 'tenant', attributes: ['slug', 'businessName', 'isActive', 'gbp_initialSyncDone', 'social_profiles', 'city', 'country'] }]
         });
 
         if (!user) {
@@ -93,7 +93,10 @@ const login = async (req, res) => {
             firstName: user.firstName,
             lastName: user.lastName,
             tenant: user.tenant,
-            isOnboarded: !!(user.tenant && user.tenant.gbp_initialSyncDone)
+            isOnboarded: !!(
+                (user.tenant && user.tenant.gbp_initialSyncDone) ||
+                (user.tenant && user.tenant.social_profiles && user.tenant.social_profiles.placeId)
+            )
         });
 
     } catch (error) {

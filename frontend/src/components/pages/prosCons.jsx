@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { apiRequest } from '../../utils/api'
+import { cachedApiRequest } from '../../utils/api'
 import './common.css'
 
 export default function ProsCons() {
@@ -14,7 +14,7 @@ export default function ProsCons() {
     const fetchProsConsData = async () => {
         try {
             setLoading(true)
-            const result = await apiRequest('/api/client/reviews')
+            const result = await cachedApiRequest('/api/client/reviews')
 
             if (result.success && result.data) {
                 const reviews = result.data.reviews || result.data || []
@@ -51,8 +51,20 @@ export default function ProsCons() {
         return (
             <div className="page-container">
                 <div className="page-header">
-                    <h1 className="page-title">Pros & Cons</h1>
-                    <p className="page-subtitle">Loading data...</p>
+                    <h1 className="page-title">Pros &amp; Cons</h1>
+                    <p className="page-subtitle">Key strengths and areas for improvement from your reviews</p>
+                </div>
+                <div className="page-content">
+                    <div className="grid-container">
+                        {[1,2].map(i => (
+                            <div key={i} className="grid-col-6 skeleton-card">
+                                <div className="skeleton skeleton-title" />
+                                {[1,2,3,4].map(j => (
+                                    <div key={j} className="skeleton skeleton-row" />
+                                ))}
+                            </div>
+                        ))}
+                    </div>
                 </div>
             </div>
         )

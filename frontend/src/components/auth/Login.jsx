@@ -158,11 +158,11 @@ const Login = () => {
           } else if (data.role === 'ADMIN') {
             navigate('/admin');
           } else {
-             // Check if user has already completed onboarding
+             // Check if user has already completed onboarding (placeId saved OR gbp synced)
              if (data.isOnboarded) {
                 navigate('/');
              } else {
-                navigate('/');
+                navigate('/onboarding');
              }
           }
         } else {

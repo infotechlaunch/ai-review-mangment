@@ -46,7 +46,37 @@ const User = sequelize.define('User', {
     isActive: {
         type: DataTypes.BOOLEAN,
         defaultValue: true,
-    }
+    },
+
+    // ── Stripe / Billing Fields ──────────────────────────────────────────────
+    stripeCustomerId: {
+        type: DataTypes.STRING,
+        allowNull: true,
+        unique: true,
+    },
+    stripeSubscriptionId: {
+        type: DataTypes.STRING,
+        allowNull: true,
+        unique: true,
+    },
+    plan: {
+        type: DataTypes.ENUM('none', 'starter', 'pro', 'growth', 'agency'),
+        defaultValue: 'none',
+        allowNull: false,
+    },
+    subscriptionStatus: {
+        type: DataTypes.ENUM('none', 'trialing', 'active', 'past_due', 'canceled', 'unpaid', 'incomplete'),
+        defaultValue: 'none',
+        allowNull: false,
+    },
+    subscriptionStartDate: {
+        type: DataTypes.DATE,
+        allowNull: true,
+    },
+    subscriptionEndDate: {
+        type: DataTypes.DATE,
+        allowNull: true,
+    },
 }, {
     timestamps: true,
     hooks: {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { apiRequest } from '../../utils/api'
+import { cachedApiRequest } from '../../utils/api'
 import './common.css'
 
 export default function SentimentMap() {
@@ -13,7 +13,7 @@ export default function SentimentMap() {
   const fetchSentimentData = async () => {
     try {
       setLoading(true)
-      const result = await apiRequest('/api/client/reviews')
+      const result = await cachedApiRequest('/api/client/reviews')
 
       if (result.success && result.data) {
         const reviews = result.data.reviews || result.data || []

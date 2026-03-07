@@ -51,6 +51,19 @@ const Tenant = sequelize.define('Tenant', {
         type: DataTypes.STRING,
         allowNull: true
     },
+    city: {
+        type: DataTypes.STRING,
+        allowNull: true
+    },
+    country: {
+        type: DataTypes.STRING,
+        allowNull: true
+    },
+    googleSearchName: {
+        type: DataTypes.STRING,
+        allowNull: true,
+        comment: 'Search name used to auto-fetch placeId via SearchApi (e.g. "Joy Biryani Raigarh")'
+    },
     timezone: {
         type: DataTypes.STRING,
         allowNull: true

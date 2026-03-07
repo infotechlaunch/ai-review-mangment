@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ override: true });
 const express = require('express');
 const cors = require('cors');
 
@@ -9,6 +9,10 @@ const cors = require('cors');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
+
+// ── Payment router must be mounted BEFORE express.json() so the webhook route
+// can apply its own express.raw() body parser for Stripe signature verification.
+app.use('/api/payments', require('./src/routers/payment_route'));
 
 // Middleware
 app.use(cors());
@@ -112,6 +116,16 @@ const startServer = async () => {
         app.listen(PORT, () => {
             console.log("Server listening on Port", PORT);
         });
+
+        // ── Cron: auto-poll Google reviews every 15 minutes ──────────────────
+        const cron = require('node-cron');
+        const { cronPollAndProcess } = require('./src/services/reviewPipelineService');
+        cron.schedule('*/15 * * * *', () => {
+            cronPollAndProcess().catch(err =>
+                console.error('[Cron error]:', err.message)
+            );
+        });
+        console.log('⏱  Cron: review polling active — runs every 15 minutes');
 
     } catch (error) {
         console.error('Failed to start server:', error);

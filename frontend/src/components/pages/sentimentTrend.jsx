@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { apiRequest } from '../../utils/api'
+import { cachedApiRequest } from '../../utils/api'
 import './common.css'
 
 export default function SentimentTrend() {
@@ -13,7 +13,7 @@ export default function SentimentTrend() {
     const fetchTrendData = async () => {
         try {
             setLoading(true)
-            const result = await apiRequest('/api/client/reviews')
+            const result = await cachedApiRequest('/api/client/reviews')
 
             if (result.success && result.data) {
                 const reviews = result.data.reviews || result.data || []
@@ -55,7 +55,15 @@ export default function SentimentTrend() {
             <div className="page-container">
                 <div className="page-header">
                     <h1 className="page-title">Sentiment Trend</h1>
-                    <p className="page-subtitle">Loading trend data...</p>
+                    <p className="page-subtitle">Track and analyze sentiment changes and patterns over time</p>
+                </div>
+                <div className="page-content">
+                    <div className="skeleton-card" style={{ padding: 24 }}>
+                        <div className="skeleton skeleton-title" />
+                        {[1,2,3,4,5,6].map(i => (
+                            <div key={i} className="skeleton skeleton-row" />
+                        ))}
+                    </div>
                 </div>
             </div>
         )

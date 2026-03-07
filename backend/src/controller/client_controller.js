@@ -757,7 +757,7 @@ const getClientSettings = async (req, res) => {
  */
 const updateClientSettings = async (req, res) => {
     try {
-        const { autoApproval, tone, automation, autoPost } = req.body;
+        const { autoApproval, tone, automation, autoPost, autoReplySchedule } = req.body;
         const userSlug = req.user.slug || req.user.tenantSlug;
 
         // Find the Tenant
@@ -774,11 +774,13 @@ const updateClientSettings = async (req, res) => {
             ...(autoApproval && { autoApproval }),
             ...(tone && { tone }),
             ...(automation && { automation }),
-            ...(autoPost && { autoPost })
+            ...(autoPost && { autoPost }),
+            ...(autoReplySchedule && { autoReplySchedule })
         };
 
-        // Update the tenant
+        // Update the tenant - force Sequelize to detect JSONB changes
         tenant.settings = newSettings;
+        tenant.changed('settings', true);
         await tenant.save();
 
         res.json({

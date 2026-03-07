@@ -9,6 +9,8 @@ const {
     generateAIReply,
     approveAndPostReply,
     updateReply,
+    postToSocial,
+    runPipelineManually,
 } = require('../controller/review_controller');
 const { authenticate, authorize } = require('../middleware/auth');
 
@@ -39,5 +41,11 @@ router.put('/:id/reply', authorize(['ADMIN', 'CLIENT_OWNER']), updateReply);
 
 // Approve and post reply to Google
 router.post('/:id/approve-reply', authorize(['ADMIN', 'CLIENT_OWNER']), approveAndPostReply);
+
+// Post review to social media (Facebook / Instagram)
+router.post('/:id/post-social', authorize(['ADMIN', 'CLIENT_OWNER']), postToSocial);
+
+// Manually trigger / re-run AI pipeline (single review or batch of pending)
+router.post('/pipeline/run', authorize(['ADMIN', 'CLIENT_OWNER']), runPipelineManually);
 
 module.exports = router;

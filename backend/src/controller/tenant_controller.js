@@ -11,11 +11,16 @@ const getTenantProfile = async (req, res) => {
         
         const tenant = await Tenant.findByPk(tenantId, {
             attributes: [
+                'id',
+                'slug',
                 'businessName', 
                 'industry', 
                 'phone', 
                 'website', 
-                'address', 
+                'address',
+                'city',
+                'country',
+                'googleSearchName',
                 'timezone', 
                 'logoUrl',
                 'communication_settings',
@@ -31,12 +36,24 @@ const getTenantProfile = async (req, res) => {
             });
         }
 
-        // Format response to match frontend expectations if necessary
-        // Or send as is if frontend adapts
-        
+        // Flatten social_profiles technical fields to top-level for easy frontend access
+        const tenantData = tenant.toJSON();
+        const sp = tenantData.social_profiles || {};
+        tenantData.placeId = sp.placeId || '';
+        tenantData.googleReviewLink = sp.googleReviewLink || '';
+        tenantData.account_resource = sp.account_resource || '';
+        tenantData.locationId = sp.locationId || '';
+        tenantData.ReviewKey = sp.ReviewKey || '';
+        tenantData.gid = sp.gid || '';
+        tenantData.ScreenshotOneHTML = sp.ScreenshotOneHTML || '';
+        tenantData.facebookPage = sp.facebookPage || '';
+        tenantData.instagramHandle = sp.instagramHandle || '';
+        tenantData.rating = sp.rating || null;
+        tenantData.reviewsCount = sp.reviewsCount || 0;
+
         res.json({
             success: true,
-            data: tenant
+            data: tenantData
         });
 
     } catch (error) {
@@ -72,7 +89,10 @@ const updateTenantProfile = async (req, res) => {
         if (updates.industry) tenant.industry = updates.industry;
         if (updates.phone) tenant.phone = updates.phone;
         if (updates.website) tenant.website = updates.website;
-        if (updates.address) tenant.address = updates.address;
+        if (updates.address !== undefined) tenant.address = updates.address;
+        if (updates.city !== undefined) tenant.city = updates.city;
+        if (updates.country !== undefined) tenant.country = updates.country;
+        if (updates.googleSearchName !== undefined) tenant.googleSearchName = updates.googleSearchName;
         if (updates.timezone) tenant.timezone = updates.timezone;
         if (updates.logoUrl) tenant.logoUrl = updates.logoUrl;
 

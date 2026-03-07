@@ -41,6 +41,28 @@ export default function Settings() {
     const [isVerifyingAccount, setIsVerifyingAccount] = useState(false)
     const [popupType, setPopupType] = useState('no-business-account') // 'no-business-account', 'quota-error', 'error'
     
+    // State for Business Profile
+    const [businessProfile, setBusinessProfile] = useState({
+        businessName: '',
+        industry: '',
+        address: '',
+        city: '',
+        country: '',
+        phone: '',
+        website: '',
+        googleSearchName: '',
+        facebookPage: '',
+        instagramHandle: '',
+        googleReviewLink: '',
+        placeId: '',
+        rating: null,
+        reviewsCount: 0,
+    });
+    const [isEditingProfile, setIsEditingProfile] = useState(false);
+    const [editedProfile, setEditedProfile] = useState({});
+    const [isSavingProfile, setIsSavingProfile] = useState(false);
+    const [profileSaveMsg, setProfileSaveMsg] = useState(null); // { type: 'success'|'error', text }
+
     // State for Auto-Approval Settings
     const [autoApproval, setAutoApproval] = useState({
         autoApprovePositive: true,
@@ -70,6 +92,17 @@ export default function Settings() {
         minRating: 5,
         platforms: ['facebook', 'instagram']
     })
+
+    // State for Auto-Reply Schedule
+    const [autoReplySchedule, setAutoReplySchedule] = useState({
+        enabled: false,
+        delayMinutes: 30,
+        startTime: '09:00',
+        endTime: '18:00',
+        timezone: 'UTC',
+        activeDays: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+    })
+    const [scheduleSettingMsg, setScheduleSettingMsg] = useState(null)
 
     // State for AI Reply Preview
     const [aiReply, setAiReply] = useState({
@@ -343,6 +376,67 @@ export default function Settings() {
         setAiReply({ ...aiReply, preview: randomReply })
     }
 
+    // Load Business Profile
+    useEffect(() => {
+        const fetchProfile = async () => {
+            try {
+                const token = localStorage.getItem('token');
+                const res = await fetch(`${api.API_BASE_URL}/api/tenant/profile`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await res.json();
+                if (data.success && data.data) {
+                    const t = data.data;
+                    const sp = t.social_profiles || {};
+                    setBusinessProfile({
+                        businessName:     t.businessName || '',
+                        industry:         t.industry || '',
+                        address:          t.address || '',
+                        city:             t.city || '',
+                        country:          t.country || '',
+                        phone:            t.phone || '',
+                        website:          t.website || '',
+                        googleSearchName: t.googleSearchName || '',
+                        facebookPage:     sp.facebookPage || t.facebookPage || '',
+                        instagramHandle:  sp.instagramHandle || t.instagramHandle || '',
+                        googleReviewLink: sp.googleReviewLink || t.googleReviewLink || '',
+                        placeId:          sp.placeId || t.placeId || '',
+                        rating:           sp.rating || null,
+                        reviewsCount:     sp.reviewsCount || 0,
+                    });
+                }
+            } catch (err) {
+                console.error('Failed to load business profile:', err);
+            }
+        };
+        fetchProfile();
+    }, []);
+
+    const handleSaveProfile = async () => {
+        try {
+            setIsSavingProfile(true);
+            setProfileSaveMsg(null);
+            const token = localStorage.getItem('token');
+            const res = await fetch(`${api.API_BASE_URL}/api/tenant/profile`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify(editedProfile)
+            });
+            const data = await res.json();
+            if (data.success) {
+                setBusinessProfile({ ...businessProfile, ...editedProfile });
+                setIsEditingProfile(false);
+                setProfileSaveMsg({ type: 'success', text: 'Business profile updated successfully.' });
+            } else {
+                setProfileSaveMsg({ type: 'error', text: data.message || 'Failed to save profile.' });
+            }
+        } catch (err) {
+            setProfileSaveMsg({ type: 'error', text: 'Error saving profile. Please try again.' });
+        } finally {
+            setIsSavingProfile(false);
+        }
+    };
+
     // Load Settings
     useEffect(() => {
         const fetchSettings = async () => {
@@ -357,7 +451,15 @@ export default function Settings() {
                 if (data.success) {
                     const s = data.settings;
                     if (s) {
-                        if (s.autoApproval) setAutoApproval(s.autoApproval);
+                        if (s.autoApproval) {
+                            const a = s.autoApproval;
+                            setAutoApproval({
+                                autoApprovePositive: a.autoApprovePositive ?? a.positive ?? true,
+                                autoApproveNeutral: a.autoApproveNeutral ?? a.neutral ?? false,
+                                autoApproveNegative: a.autoApproveNegative ?? a.negative ?? false,
+                                autoApproveMinRating: a.autoApproveMinRating ?? a.minRating ?? 4,
+                            });
+                        }
                         if (s.tone) {
                         setToneSettings({
                             toneStyle: s.tone.style,
@@ -380,6 +482,7 @@ export default function Settings() {
                             platforms: s.autoPost.platforms || ['facebook', 'instagram']
                         });
                     }
+                    if (s.autoReplySchedule) setAutoReplySchedule(s.autoReplySchedule);
                 } // End of if (s)
             } // End of if (data.success)
         } catch (error) {
@@ -409,7 +512,8 @@ export default function Settings() {
                     enabled: autoPostSettings.enabled,
                     minRating: autoPostSettings.minRating,
                     platforms: autoPostSettings.platforms
-                }
+                },
+                autoReplySchedule: autoReplySchedule
             };
 
             const response = await fetch(`${api.API_BASE_URL}/api/client/settings`, {
@@ -430,6 +534,30 @@ export default function Settings() {
         } catch (error) {
             console.error('Error saving settings:', error);
             alert('Error saving settings');
+        }
+    };
+
+    const handleSaveScheduleSettings = async () => {
+        try {
+            setScheduleSettingMsg(null);
+            const token = localStorage.getItem('token');
+            const response = await fetch(`${api.API_BASE_URL}/api/client/settings`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ autoReplySchedule })
+            });
+            const data = await response.json();
+            if (data.success) {
+                setScheduleSettingMsg({ type: 'success', text: 'Auto-reply schedule saved successfully.' });
+            } else {
+                setScheduleSettingMsg({ type: 'error', text: data.message || 'Failed to save schedule settings.' });
+            }
+        } catch (error) {
+            console.error('Error saving schedule settings:', error);
+            setScheduleSettingMsg({ type: 'error', text: 'Error saving schedule settings. Please try again.' });
         }
     };
 
@@ -587,7 +715,7 @@ export default function Settings() {
                                     </div>
                                 </div>
 
-                                {/* Manual Place ID Configuration (Option B - Dev Mode) */}
+                                {/* Manual Place ID Configuration (Option B - Dev Mode)
                                 <div className="widget-card" style={{ marginTop: '24px' }}>
                                     <h3 className="widget-title">Development Mode (Option B)</h3>
                                     <p style={{ fontSize: '13px', color: 'var(--text-tertiary)', marginBottom: '20px' }}>
@@ -664,14 +792,129 @@ export default function Settings() {
                                             </p>
                                         </div>
                                     </div>
+                                </div> */}
+
+                            </div>
+
+                            {/* ── Business Profile Card ──
+                            <div className="widget-card" style={{ marginTop: '24px', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '24px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
+                                    <div>
+                                        <h3 className="widget-title" style={{ margin: 0 }}>Business Profile</h3>
+                                        <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--text-tertiary)' }}>Your business details used for review management</p>
+                                    </div>
+                                    {!isEditingProfile && (
+                                        <button
+                                            onClick={() => { setEditedProfile({ ...businessProfile }); setIsEditingProfile(true); setProfileSaveMsg(null); }}
+                                            style={{ padding: '8px 18px', background: 'var(--primary-color)', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}
+                                        >
+                                            ✏️ Edit
+                                        </button>
+                                    )}
                                 </div>
 
-                                <div style={{
+                                {profileSaveMsg && (
+                                    <div style={{ marginBottom: '16px', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: '500',
+                                        background: profileSaveMsg.type === 'success' ? '#d1fae5' : '#fee2e2',
+                                        color: profileSaveMsg.type === 'success' ? '#065f46' : '#991b1b' }}>
+                                        {profileSaveMsg.type === 'success' ? '✅ ' : '❌ '}{profileSaveMsg.text}
+                                    </div>
+                                )}
+
+                                {isEditingProfile ? (
+                                    <>
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                                            {[
+                                                { label: 'Business Name', key: 'businessName', required: true },
+                                                { label: 'Industry / Category', key: 'industry', type: 'select', options: ['','restaurant','retail','healthcare','services','beauty','other'], optionLabels: ['Select Category','Restaurant & Food','Retail','Healthcare','Professional Services','Beauty & Wellness','Other'] },
+                                                { label: 'Address', key: 'address', span: true },
+                                                { label: 'City', key: 'city', required: true },
+                                                { label: 'Country', key: 'country', required: true },
+                                                { label: 'Phone', key: 'phone', type: 'tel' },
+                                                { label: 'Website', key: 'website', type: 'url' },
+                                                { label: 'Facebook Page URL', key: 'facebookPage', type: 'url' },
+                                                { label: 'Instagram Handle', key: 'instagramHandle' },
+                                                { label: 'Google Review Link', key: 'googleReviewLink', type: 'url', span: true },
+                                            ].map(({ label, key, type = 'text', required, span, options, optionLabels }) => (
+                                                <div key={key} style={{ gridColumn: span ? '1 / -1' : undefined }}>
+                                                    <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                                                        {label}{required && <span style={{ color: '#ef4444' }}> *</span>}
+                                                    </label>
+                                                    {options ? (
+                                                        <select
+                                                            value={editedProfile[key] || ''}
+                                                            onChange={e => setEditedProfile(p => ({ ...p, [key]: e.target.value }))}
+                                                            style={{ width: '100%', padding: '9px 10px', border: '1px solid var(--border-color)', borderRadius: '8px', fontSize: '14px', color: 'var(--text-primary)', background: 'var(--card-bg)' }}
+                                                        >
+                                                            {options.map((o, i) => <option key={o} value={o}>{optionLabels[i]}</option>)}
+                                                        </select>
+                                                    ) : (
+                                                        <input
+                                                            type={type}
+                                                            value={editedProfile[key] || ''}
+                                                            onChange={e => setEditedProfile(p => ({ ...p, [key]: e.target.value }))}
+                                                            style={{ width: '100%', padding: '9px 10px', border: '1px solid var(--border-color)', borderRadius: '8px', fontSize: '14px', color: 'var(--text-primary)', background: 'var(--card-bg)', boxSizing: 'border-box' }}
+                                                        />
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div style={{ display: 'flex', gap: '12px', marginTop: '20px' }}>
+                                            <button
+                                                onClick={handleSaveProfile}
+                                                disabled={isSavingProfile || !editedProfile.businessName?.trim() || !editedProfile.city?.trim() || !editedProfile.country?.trim()}
+                                                style={{ padding: '10px 24px', background: 'var(--primary-color)', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: '600', cursor: 'pointer', opacity: isSavingProfile ? 0.7 : 1 }}
+                                            >
+                                                {isSavingProfile ? 'Saving...' : '💾 Save Profile'}
+                                            </button>
+                                            <button
+                                                onClick={() => { setIsEditingProfile(false); setProfileSaveMsg(null); }}
+                                                style={{ padding: '10px 20px', background: 'var(--bg-tertiary)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)', borderRadius: '8px', fontSize: '14px', cursor: 'pointer' }}
+                                            >
+                                                Cancel
+                                            </button>
+                                        </div>
+                                    </>
+                                ) : (
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                                        {[
+                                            { label: 'Business Name', value: businessProfile.businessName },
+                                            { label: 'Industry', value: businessProfile.industry },
+                                            { label: 'Address', value: [businessProfile.address, businessProfile.city, businessProfile.country].filter(Boolean).join(', '), span: true },
+                                            { label: 'Phone', value: businessProfile.phone },
+                                            { label: 'Website', value: businessProfile.website, link: true },
+                                            { label: 'Facebook', value: businessProfile.facebookPage, link: true },
+                                            { label: 'Instagram', value: businessProfile.instagramHandle },
+                                            { label: 'Google Review Link', value: businessProfile.googleReviewLink, link: true, span: true },
+                                            { label: 'Google Rating', value: businessProfile.rating ? `⭐ ${businessProfile.rating} (${businessProfile.reviewsCount} reviews)` : null },
+                                            { label: 'Place ID', value: businessProfile.placeId, mono: true },
+                                        ].map(({ label, value, link, span, mono }) => (
+                                            <div key={label} style={{ gridColumn: span ? '1 / -1' : undefined, padding: '10px 14px', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
+                                                <div style={{ fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-tertiary)', marginBottom: '4px' }}>{label}</div>
+                                                {value ? (
+                                                    link ? (
+                                                        <a href={value.startsWith('http') ? value : `https://${value}`} target="_blank" rel="noopener noreferrer"
+                                                            style={{ fontSize: '14px', color: 'var(--primary-color)', wordBreak: 'break-all' }}>{value}</a>
+                                                    ) : (
+                                                        <span style={{ fontSize: '14px', color: 'var(--text-primary)', fontFamily: mono ? 'monospace' : 'inherit', wordBreak: 'break-all' }}>{value}</span>
+                                                    )
+                                                ) : (
+                                                    <span style={{ fontSize: '13px', color: 'var(--text-tertiary)', fontStyle: 'italic' }}>Not set</span>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div> */}
+
+                            {/* ── About Platform Connections ── */}
+                            <div style={{
                                     padding: '16px',
                                     backgroundColor: 'var(--bg-secondary)',
                                     borderRadius: '8px',
                                     fontSize: '13px',
-                                    color: 'var(--text-secondary)'
+                                    color: 'var(--text-secondary)',
+                                    marginTop: '24px'
                                 }}>
                                     <p style={{ margin: 0, fontWeight: '600', marginBottom: '8px' }}>
                                         💡 About Platform Connections
@@ -685,14 +928,13 @@ export default function Settings() {
                                 </div>
                             </div>
                         </div>
-                    </div>
                 )}
 
                 {/* Reply Settings Tab */}
                 {activeTab === 'reply-settings' && (
                     <>
                         {/* AI Reply Preview Section */}
-                        <div className="grid-container">
+                        {/* <div className="grid-container">
                             <div className="grid-col-12">
                                 <div className="widget-card">
                                     <h3 className="widget-title">AI Reply Preview</h3>
@@ -819,6 +1061,281 @@ export default function Settings() {
                                                 </button>
                                             </>
                                         )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div> */}
+
+                        {/* Auto-Reply Schedule */}
+                        <div className="grid-container" style={{ marginTop: '24px' }}>
+                            <div className="grid-col-12">
+                                <div className="widget-card">
+                                    <h3 className="widget-title">⏰ Auto-Reply Schedule</h3>
+                                    <p style={{ fontSize: '13px', color: 'var(--text-tertiary)', marginBottom: '20px' }}>
+                                        Control <strong>when</strong> the AI sends auto-replies — set a delay, an active time window, and which days of the week it operates
+                                    </p>
+
+                                    {scheduleSettingMsg && (
+                                        <div style={{
+                                            marginBottom: '16px', padding: '10px 14px', borderRadius: '8px',
+                                            background: scheduleSettingMsg.type === 'success' ? '#d1fae5' : '#fee2e2',
+                                            color: scheduleSettingMsg.type === 'success' ? '#065f46' : '#991b1b',
+                                            fontSize: '13px', fontWeight: '500'
+                                        }}>
+                                            {scheduleSettingMsg.type === 'success' ? '✅ ' : '❌ '}{scheduleSettingMsg.text}
+                                        </div>
+                                    )}
+
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                                        {/* Enable Toggle */}
+                                        <div style={{
+                                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                            padding: '20px', backgroundColor: 'var(--bg-secondary)', borderRadius: '8px',
+                                            border: `2px solid ${autoReplySchedule.enabled ? 'var(--primary-color)' : 'var(--border-color)'}`
+                                        }}>
+                                            <div>
+                                                <div style={{ fontWeight: '600', fontSize: '16px', color: 'var(--text-primary)' }}>
+                                                    Enable Auto-Reply Scheduling
+                                                </div>
+                                                <div style={{ fontSize: '13px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
+                                                    AI will only send auto-replies within the configured time window and days
+                                                </div>
+                                            </div>
+                                            <label style={{ position: 'relative', display: 'inline-block', width: '60px', height: '30px' }}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={autoReplySchedule.enabled}
+                                                    onChange={(e) => setAutoReplySchedule({ ...autoReplySchedule, enabled: e.target.checked })}
+                                                    style={{ opacity: 0, width: 0, height: 0 }}
+                                                />
+                                                <span style={{
+                                                    position: 'absolute', cursor: 'pointer', top: 0, left: 0, right: 0, bottom: 0,
+                                                    backgroundColor: autoReplySchedule.enabled ? '#10b981' : '#ccc',
+                                                    transition: '0.4s', borderRadius: '30px'
+                                                }}>
+                                                    <span style={{
+                                                        position: 'absolute', height: '24px', width: '24px',
+                                                        left: autoReplySchedule.enabled ? '33px' : '3px', bottom: '3px',
+                                                        backgroundColor: 'white', transition: '0.4s', borderRadius: '50%'
+                                                    }}></span>
+                                                </span>
+                                            </label>
+                                        </div>
+
+                                        {autoReplySchedule.enabled && (
+                                            <>
+                                                {/* Reply Delay */}
+                                                <div style={{ padding: '20px', backgroundColor: 'var(--bg-secondary)', borderRadius: '8px' }}>
+                                                    <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: 'var(--text-primary)', marginBottom: '12px' }}>
+                                                        ⏱️ Reply Delay After Review Received
+                                                    </label>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                                                        <input
+                                                            type="range"
+                                                            min="0"
+                                                            max="120"
+                                                            step="5"
+                                                            value={autoReplySchedule.delayMinutes}
+                                                            onChange={(e) => setAutoReplySchedule({ ...autoReplySchedule, delayMinutes: parseInt(e.target.value) })}
+                                                            style={{ flex: 1, accentColor: 'var(--primary-color)', height: '6px', cursor: 'pointer' }}
+                                                        />
+                                                        <div style={{
+                                                            minWidth: '90px', padding: '8px 12px',
+                                                            backgroundColor: 'var(--primary-color)', color: 'white',
+                                                            borderRadius: '8px', textAlign: 'center',
+                                                            fontSize: '14px', fontWeight: '700'
+                                                        }}>
+                                                            {autoReplySchedule.delayMinutes === 0 ? '⚡ Instant' : `${autoReplySchedule.delayMinutes} min`}
+                                                        </div>
+                                                    </div>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '6px' }}>
+                                                        <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>0 (Instant)</span>
+                                                        <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>30 min</span>
+                                                        <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>60 min</span>
+                                                        <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>2 hours</span>
+                                                    </div>
+                                                    <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
+                                                        Wait this long after a review is received before sending the auto-reply
+                                                    </div>
+                                                </div>
+
+                                                {/* Time Window + Timezone */}
+                                                <div style={{ padding: '20px', backgroundColor: 'var(--bg-secondary)', borderRadius: '8px' }}>
+                                                    <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: 'var(--text-primary)', marginBottom: '12px' }}>
+                                                        🕐 Active Reply Time Window
+                                                    </label>
+                                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
+                                                        <div>
+                                                            <label style={{ display: 'block', fontSize: '11px', fontWeight: '700', color: 'var(--text-tertiary)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                                                                From
+                                                            </label>
+                                                            <input
+                                                                type="time"
+                                                                value={autoReplySchedule.startTime}
+                                                                onChange={(e) => setAutoReplySchedule({ ...autoReplySchedule, startTime: e.target.value })}
+                                                                style={{
+                                                                    width: '100%', padding: '10px', border: '1px solid var(--border-color)',
+                                                                    borderRadius: '6px', fontSize: '14px', color: 'var(--text-primary)',
+                                                                    backgroundColor: 'var(--card-bg)', boxSizing: 'border-box'
+                                                                }}
+                                                            />
+                                                        </div>
+                                                        <div>
+                                                            <label style={{ display: 'block', fontSize: '11px', fontWeight: '700', color: 'var(--text-tertiary)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                                                                To
+                                                            </label>
+                                                            <input
+                                                                type="time"
+                                                                value={autoReplySchedule.endTime}
+                                                                onChange={(e) => setAutoReplySchedule({ ...autoReplySchedule, endTime: e.target.value })}
+                                                                style={{
+                                                                    width: '100%', padding: '10px', border: '1px solid var(--border-color)',
+                                                                    borderRadius: '6px', fontSize: '14px', color: 'var(--text-primary)',
+                                                                    backgroundColor: 'var(--card-bg)', boxSizing: 'border-box'
+                                                                }}
+                                                            />
+                                                        </div>
+                                                        <div>
+                                                            <label style={{ display: 'block', fontSize: '11px', fontWeight: '700', color: 'var(--text-tertiary)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                                                                Timezone
+                                                            </label>
+                                                            <select
+                                                                value={autoReplySchedule.timezone}
+                                                                onChange={(e) => setAutoReplySchedule({ ...autoReplySchedule, timezone: e.target.value })}
+                                                                style={{
+                                                                    width: '100%', padding: '10px', border: '1px solid var(--border-color)',
+                                                                    borderRadius: '6px', fontSize: '14px', color: 'var(--text-primary)',
+                                                                    backgroundColor: 'var(--card-bg)'
+                                                                }}
+                                                            >
+                                                                <option value="UTC">UTC</option>
+                                                                <option value="America/New_York">Eastern (ET)</option>
+                                                                <option value="America/Chicago">Central (CT)</option>
+                                                                <option value="America/Denver">Mountain (MT)</option>
+                                                                <option value="America/Los_Angeles">Pacific (PT)</option>
+                                                                <option value="Europe/London">London (GMT)</option>
+                                                                <option value="Europe/Paris">Central Europe (CET)</option>
+                                                                <option value="Asia/Dubai">Dubai (GST)</option>
+                                                                <option value="Asia/Kolkata">India (IST)</option>
+                                                                <option value="Asia/Singapore">Singapore (SGT)</option>
+                                                                <option value="Asia/Tokyo">Japan (JST)</option>
+                                                                <option value="Australia/Sydney">Sydney (AEST)</option>
+                                                            </select>
+                                                        </div>
+                                                    </div>
+                                                    <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '8px' }}>
+                                                        Reviews received outside this window will be queued and replied when the window opens
+                                                    </div>
+                                                </div>
+
+                                                {/* Active Days */}
+                                                <div style={{ padding: '20px', backgroundColor: 'var(--bg-secondary)', borderRadius: '8px' }}>
+                                                    <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: 'var(--text-primary)', marginBottom: '12px' }}>
+                                                        📅 Active Days
+                                                    </label>
+                                                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
+                                                        {[
+                                                            { key: 'monday', short: 'Mon' },
+                                                            { key: 'tuesday', short: 'Tue' },
+                                                            { key: 'wednesday', short: 'Wed' },
+                                                            { key: 'thursday', short: 'Thu' },
+                                                            { key: 'friday', short: 'Fri' },
+                                                            { key: 'saturday', short: 'Sat' },
+                                                            { key: 'sunday', short: 'Sun' },
+                                                        ].map(({ key, short }) => {
+                                                            const isActive = autoReplySchedule.activeDays.includes(key);
+                                                            return (
+                                                                <button
+                                                                    key={key}
+                                                                    onClick={() => {
+                                                                        const days = autoReplySchedule.activeDays;
+                                                                        setAutoReplySchedule({
+                                                                            ...autoReplySchedule,
+                                                                            activeDays: isActive
+                                                                                ? days.filter(d => d !== key)
+                                                                                : [...days, key]
+                                                                        });
+                                                                    }}
+                                                                    style={{
+                                                                        padding: '8px 16px',
+                                                                        borderRadius: '20px',
+                                                                        border: `2px solid ${isActive ? 'var(--primary-color)' : 'var(--border-color)'}`,
+                                                                        backgroundColor: isActive ? 'var(--primary-color)' : 'transparent',
+                                                                        color: isActive ? 'white' : 'var(--text-secondary)',
+                                                                        cursor: 'pointer',
+                                                                        fontSize: '13px',
+                                                                        fontWeight: '600',
+                                                                        transition: 'all 0.2s ease'
+                                                                    }}
+                                                                >
+                                                                    {short}
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                                        <button
+                                                            onClick={() => setAutoReplySchedule({ ...autoReplySchedule, activeDays: ['monday','tuesday','wednesday','thursday','friday'] })}
+                                                            style={{ padding: '5px 12px', fontSize: '12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-secondary)', cursor: 'pointer', fontWeight: '500' }}
+                                                        >
+                                                            Weekdays only
+                                                        </button>
+                                                        <button
+                                                            onClick={() => setAutoReplySchedule({ ...autoReplySchedule, activeDays: ['saturday','sunday'] })}
+                                                            style={{ padding: '5px 12px', fontSize: '12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-secondary)', cursor: 'pointer', fontWeight: '500' }}
+                                                        >
+                                                            Weekends only
+                                                        </button>
+                                                        <button
+                                                            onClick={() => setAutoReplySchedule({ ...autoReplySchedule, activeDays: ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'] })}
+                                                            style={{ padding: '5px 12px', fontSize: '12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-secondary)', cursor: 'pointer', fontWeight: '500' }}
+                                                        >
+                                                            Every day
+                                                        </button>
+                                                        <button
+                                                            onClick={() => setAutoReplySchedule({ ...autoReplySchedule, activeDays: [] })}
+                                                            style={{ padding: '5px 12px', fontSize: '12px', borderRadius: '6px', border: '1px solid #ef4444', backgroundColor: 'transparent', color: '#ef4444', cursor: 'pointer', fontWeight: '500' }}
+                                                        >
+                                                            Clear all
+                                                        </button>
+                                                    </div>
+                                                </div>
+
+                                                {/* Live Summary */}
+                                                <div style={{
+                                                    padding: '16px', borderRadius: '8px',
+                                                    backgroundColor: 'rgba(99,102,241,0.08)',
+                                                    border: '1px solid rgba(99,102,241,0.25)'
+                                                }}>
+                                                    <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.7' }}>
+                                                        <span style={{ fontWeight: '700', color: 'var(--primary-color)' }}>📋 Schedule Summary: </span>
+                                                        Auto-replies will be sent{' '}
+                                                        <strong>{autoReplySchedule.delayMinutes === 0 ? 'immediately' : `after a ${autoReplySchedule.delayMinutes}-minute delay`}</strong>,
+                                                        between <strong>{autoReplySchedule.startTime}</strong> and <strong>{autoReplySchedule.endTime}</strong>{' '}
+                                                        ({autoReplySchedule.timezone}), on{' '}
+                                                        <strong>
+                                                            {autoReplySchedule.activeDays.length === 0
+                                                                ? '⚠️ no days selected'
+                                                                : autoReplySchedule.activeDays.length === 7
+                                                                ? 'every day'
+                                                                : autoReplySchedule.activeDays.map(d => d.charAt(0).toUpperCase() + d.slice(1, 3)).join(', ')}
+                                                        </strong>.
+                                                    </p>
+                                                </div>
+                                            </>
+                                        )}
+
+                                        <button
+                                            onClick={handleSaveScheduleSettings}
+                                            style={{
+                                                width: '100%', padding: '12px',
+                                                backgroundColor: 'var(--primary-color)', color: 'white',
+                                                border: 'none', borderRadius: '6px',
+                                                fontSize: '14px', fontWeight: '600', cursor: 'pointer'
+                                            }}
+                                        >
+                                            💾 Save Schedule Settings
+                                        </button>
                                     </div>
                                 </div>
                             </div>
@@ -1173,194 +1690,19 @@ export default function Settings() {
                 {/* Automation Tab */}
                 {activeTab === 'automation' && (
                     <>
-                    <div className="grid-container">
-                        <div className="grid-col-12">
-                            <div className="widget-card">
-                                <h3 className="widget-title">Review Request Automation</h3>
-                                <p style={{ fontSize: '13px', color: 'var(--text-tertiary)', marginBottom: '20px' }}>
-                                    Automatically send review requests to customers after their visit
-                                </p>
-
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                                    {/* Enable/Disable */}
-                                    <div style={{ 
-                                        display: 'flex', 
-                                        justifyContent: 'space-between', 
-                                        alignItems: 'center',
-                                        padding: '20px',
-                                        backgroundColor: 'var(--bg-secondary)',
-                                        borderRadius: '8px',
-                                        border: '2px solid var(--border-color)'
-                                    }}>
-                                        <div>
-                                            <div style={{ fontWeight: '600', fontSize: '16px', color: 'var(--text-primary)' }}>
-                                                Enable Review Request Automation
-                                            </div>
-                                            <div style={{ fontSize: '13px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
-                                                Automatically send requests to customers via selected channels
-                                            </div>
-                                        </div>
-                                        <label style={{ position: 'relative', display: 'inline-block', width: '60px', height: '30px' }}>
-                                            <input
-                                                type="checkbox"
-                                                checked={reviewRequest.enabled}
-                                                onChange={(e) => setReviewRequest({ ...reviewRequest, enabled: e.target.checked })}
-                                                style={{ opacity: 0, width: 0, height: 0 }}
-                                            />
-                                            <span style={{
-                                                position: 'absolute',
-                                                cursor: 'pointer',
-                                                top: 0,
-                                                left: 0,
-                                                right: 0,
-                                                bottom: 0,
-                                                backgroundColor: reviewRequest.enabled ? '#10b981' : '#ccc',
-                                                transition: '0.4s',
-                                                borderRadius: '30px'
-                                            }}>
-                                                <span style={{
-                                                    position: 'absolute',
-                                                    content: '',
-                                                    height: '24px',
-                                                    width: '24px',
-                                                    left: reviewRequest.enabled ? '33px' : '3px',
-                                                    bottom: '3px',
-                                                    backgroundColor: 'white',
-                                                    transition: '0.4s',
-                                                    borderRadius: '50%'
-                                                }}></span>
-                                            </span>
-                                        </label>
-                                    </div>
-
-                                    {reviewRequest.enabled && (
-                                        <>
-                                            {/* Channel Selector */}
-                                            <div>
-                                                <label style={{ 
-                                                    display: 'block',
-                                                    fontWeight: '600',
-                                                    fontSize: '14px',
-                                                    color: 'var(--text-primary)',
-                                                    marginBottom: '12px'
-                                                }}>
-                                                    Communication Channels
-                                                </label>
-                                                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                                                    {['email', 'sms', 'whatsapp'].map(channel => (
-                                                        <button
-                                                            key={channel}
-                                                            onClick={() => handleToggleChannel(channel)}
-                                                            style={{
-                                                                padding: '8px 16px',
-                                                                borderRadius: '20px',
-                                                                border: `1px solid ${reviewRequest.channels.includes(channel) ? 'var(--primary-color)' : 'var(--border-color)'}`,
-                                                                backgroundColor: reviewRequest.channels.includes(channel) ? 'var(--primary-color-light)' : 'transparent',
-                                                                color: reviewRequest.channels.includes(channel) ? 'var(--primary-color)' : 'var(--text-secondary)',
-                                                                cursor: 'pointer',
-                                                                fontSize: '14px',
-                                                                textTransform: 'capitalize'
-                                                            }}
-                                                        >
-                                                            {channel === 'sms' ? 'SMS' : channel.charAt(0).toUpperCase() + channel.slice(1)}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            </div>
-
-                                            {/* Days After Visit */}
-                                            <div>
-                                                <label style={{ 
-                                                    display: 'block',
-                                                    fontWeight: '600',
-                                                    fontSize: '14px',
-                                                    color: 'var(--text-primary)',
-                                                    marginBottom: '8px'
-                                                }}>
-                                                    Send Request After (Days)
-                                                </label>
-                                                <input
-                                                    type="number"
-                                                    min="1"
-                                                    max="30"
-                                                    value={reviewRequest.daysAfterVisit}
-                                                    onChange={(e) => setReviewRequest({ ...reviewRequest, daysAfterVisit: parseInt(e.target.value) })}
-                                                    style={{
-                                                        width: '100%',
-                                                        padding: '10px',
-                                                        border: '1px solid var(--border-color)',
-                                                        borderRadius: '6px',
-                                                        fontSize: '14px',
-                                                        color: 'var(--text-primary)',
-                                                        backgroundColor: 'var(--card-bg)'
-                                                    }}
-                                                />
-                                            </div>
-
-                                            {/* Monthly Limit */}
-                                            <div>
-                                                <label style={{ 
-                                                    display: 'block',
-                                                    fontWeight: '600',
-                                                    fontSize: '14px',
-                                                    color: 'var(--text-primary)',
-                                                    marginBottom: '8px'
-                                                }}>
-                                                    Monthly Limit Per Customer
-                                                </label>
-                                                <input
-                                                    type="number"
-                                                    min="1"
-                                                    max="10"
-                                                    value={reviewRequest.monthlyLimitPerCustomer}
-                                                    onChange={(e) => setReviewRequest({ ...reviewRequest, monthlyLimitPerCustomer: parseInt(e.target.value) })}
-                                                    style={{
-                                                        width: '100%',
-                                                        padding: '10px',
-                                                        border: '1px solid var(--border-color)',
-                                                        borderRadius: '6px',
-                                                        fontSize: '14px',
-                                                        color: 'var(--text-primary)',
-                                                        backgroundColor: 'var(--card-bg)'
-                                                    }}
-                                                />
-                                            </div>
-                                        </>
-                                    )}
-
-                                    <button
-                                        onClick={handleSaveSettings}
-                                        style={{
-                                            width: '100%',
-                                            padding: '12px',
-                                            backgroundColor: 'var(--primary-color)',
-                                            color: 'white',
-                                            border: 'none',
-                                            borderRadius: '6px',
-                                            fontSize: '14px',
-                                            fontWeight: '600',
-                                            cursor: 'pointer',
-                                            marginTop: '8px'
-                                        }}
-                                    >
-                                        Save Automation Settings
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                        <div className="grid-container" style={{ marginTop: '24px' }}>
-                            <div className="grid-col-6">
+                        {/* Social Auto-Share */}
+                        <div className="grid-container">
+                            <div className="grid-col-12">
                                 <div className="widget-card">
                                     <h3 className="widget-title">Social Auto-Share</h3>
                                     <p style={{ fontSize: '13px', color: 'var(--text-tertiary)', marginBottom: '20px' }}>
                                         Automatically create social posts for top-rated reviews
                                     </p>
-                                    
+
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                                        <div style={{ 
-                                            display: 'flex', 
-                                            justifyContent: 'space-between', 
+                                        <div style={{
+                                            display: 'flex',
+                                            justifyContent: 'space-between',
                                             alignItems: 'center',
                                             padding: '16px',
                                             backgroundColor: 'var(--bg-secondary)',
@@ -1375,8 +1717,8 @@ export default function Settings() {
                                                 </div>
                                             </div>
                                             <label style={{ position: 'relative', display: 'inline-block', width: '50px', height: '24px' }}>
-                                                <input 
-                                                    type="checkbox" 
+                                                <input
+                                                    type="checkbox"
                                                     checked={autoPostSettings.enabled}
                                                     onChange={(e) => setAutoPostSettings({ ...autoPostSettings, enabled: e.target.checked })}
                                                     style={{ opacity: 0, width: 0, height: 0 }}
@@ -1412,12 +1754,12 @@ export default function Settings() {
                                                 <div style={{ display: 'flex', gap: '12px' }}>
                                                     {['facebook', 'instagram'].map(platform => (
                                                         <label key={platform} style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-primary)' }}>
-                                                            <input 
+                                                            <input
                                                                 type="checkbox"
                                                                 checked={autoPostSettings.platforms.includes(platform)}
                                                                 onChange={(e) => {
                                                                     const current = autoPostSettings.platforms;
-                                                                    const updated = e.target.checked 
+                                                                    const updated = e.target.checked
                                                                         ? [...current, platform]
                                                                         : current.filter(p => p !== platform);
                                                                     setAutoPostSettings({ ...autoPostSettings, platforms: updated });
@@ -1429,10 +1771,206 @@ export default function Settings() {
                                                 </div>
                                             </div>
                                         )}
+
+                                        <button
+                                            onClick={handleSaveSettings}
+                                            style={{
+                                                width: '100%',
+                                                padding: '12px',
+                                                backgroundColor: 'var(--primary-color)',
+                                                color: 'white',
+                                                border: 'none',
+                                                borderRadius: '6px',
+                                                fontSize: '14px',
+                                                fontWeight: '600',
+                                                cursor: 'pointer',
+                                                marginTop: '8px'
+                                            }}
+                                        >
+                                            Save Social Auto-Share Settings
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                    </div>
+
+                        {/* Review Request Automation */}
+                        <div className="grid-container" style={{ marginTop: '24px' }}>
+                            <div className="grid-col-12">
+                                <div className="widget-card">
+                                    <h3 className="widget-title">Review Request Automation</h3>
+                                    <p style={{ fontSize: '13px', color: 'var(--text-tertiary)', marginBottom: '20px' }}>
+                                        Automatically send review requests to customers after their visit
+                                    </p>
+
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                                        {/* Enable/Disable */}
+                                        <div style={{
+                                            display: 'flex',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center',
+                                            padding: '20px',
+                                            backgroundColor: 'var(--bg-secondary)',
+                                            borderRadius: '8px',
+                                            border: '2px solid var(--border-color)'
+                                        }}>
+                                            <div>
+                                                <div style={{ fontWeight: '600', fontSize: '16px', color: 'var(--text-primary)' }}>
+                                                    Enable Review Request Automation
+                                                </div>
+                                                <div style={{ fontSize: '13px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
+                                                    Automatically send requests to customers via selected channels
+                                                </div>
+                                            </div>
+                                            <label style={{ position: 'relative', display: 'inline-block', width: '60px', height: '30px' }}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={reviewRequest.enabled}
+                                                    onChange={(e) => setReviewRequest({ ...reviewRequest, enabled: e.target.checked })}
+                                                    style={{ opacity: 0, width: 0, height: 0 }}
+                                                />
+                                                <span style={{
+                                                    position: 'absolute',
+                                                    cursor: 'pointer',
+                                                    top: 0,
+                                                    left: 0,
+                                                    right: 0,
+                                                    bottom: 0,
+                                                    backgroundColor: reviewRequest.enabled ? '#10b981' : '#ccc',
+                                                    transition: '0.4s',
+                                                    borderRadius: '30px'
+                                                }}>
+                                                    <span style={{
+                                                        position: 'absolute',
+                                                        content: '',
+                                                        height: '24px',
+                                                        width: '24px',
+                                                        left: reviewRequest.enabled ? '33px' : '3px',
+                                                        bottom: '3px',
+                                                        backgroundColor: 'white',
+                                                        transition: '0.4s',
+                                                        borderRadius: '50%'
+                                                    }}></span>
+                                                </span>
+                                            </label>
+                                        </div>
+
+                                        {reviewRequest.enabled && (
+                                            <>
+                                                {/* Channel Selector */}
+                                                <div>
+                                                    <label style={{
+                                                        display: 'block',
+                                                        fontWeight: '600',
+                                                        fontSize: '14px',
+                                                        color: 'var(--text-primary)',
+                                                        marginBottom: '12px'
+                                                    }}>
+                                                        Communication Channels
+                                                    </label>
+                                                    <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                                                        {['email', 'sms', 'whatsapp'].map(channel => (
+                                                            <button
+                                                                key={channel}
+                                                                onClick={() => handleToggleChannel(channel)}
+                                                                style={{
+                                                                    padding: '8px 16px',
+                                                                    borderRadius: '20px',
+                                                                    border: `1px solid ${reviewRequest.channels.includes(channel) ? 'var(--primary-color)' : 'var(--border-color)'}`,
+                                                                    backgroundColor: reviewRequest.channels.includes(channel) ? 'var(--primary-color-light)' : 'transparent',
+                                                                    color: reviewRequest.channels.includes(channel) ? 'var(--primary-color)' : 'var(--text-secondary)',
+                                                                    cursor: 'pointer',
+                                                                    fontSize: '14px',
+                                                                    textTransform: 'capitalize'
+                                                                }}
+                                                            >
+                                                                {channel === 'sms' ? 'SMS' : channel.charAt(0).toUpperCase() + channel.slice(1)}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+
+                                                {/* Days After Visit */}
+                                                <div>
+                                                    <label style={{
+                                                        display: 'block',
+                                                        fontWeight: '600',
+                                                        fontSize: '14px',
+                                                        color: 'var(--text-primary)',
+                                                        marginBottom: '8px'
+                                                    }}>
+                                                        Send Request After (Days)
+                                                    </label>
+                                                    <input
+                                                        type="number"
+                                                        min="1"
+                                                        max="30"
+                                                        value={reviewRequest.daysAfterVisit}
+                                                        onChange={(e) => setReviewRequest({ ...reviewRequest, daysAfterVisit: parseInt(e.target.value) })}
+                                                        style={{
+                                                            width: '100%',
+                                                            padding: '10px',
+                                                            border: '1px solid var(--border-color)',
+                                                            borderRadius: '6px',
+                                                            fontSize: '14px',
+                                                            color: 'var(--text-primary)',
+                                                            backgroundColor: 'var(--card-bg)'
+                                                        }}
+                                                    />
+                                                </div>
+
+                                                {/* Monthly Limit */}
+                                                <div>
+                                                    <label style={{
+                                                        display: 'block',
+                                                        fontWeight: '600',
+                                                        fontSize: '14px',
+                                                        color: 'var(--text-primary)',
+                                                        marginBottom: '8px'
+                                                    }}>
+                                                        Monthly Limit Per Customer
+                                                    </label>
+                                                    <input
+                                                        type="number"
+                                                        min="1"
+                                                        max="10"
+                                                        value={reviewRequest.monthlyLimitPerCustomer}
+                                                        onChange={(e) => setReviewRequest({ ...reviewRequest, monthlyLimitPerCustomer: parseInt(e.target.value) })}
+                                                        style={{
+                                                            width: '100%',
+                                                            padding: '10px',
+                                                            border: '1px solid var(--border-color)',
+                                                            borderRadius: '6px',
+                                                            fontSize: '14px',
+                                                            color: 'var(--text-primary)',
+                                                            backgroundColor: 'var(--card-bg)'
+                                                        }}
+                                                    />
+                                                </div>
+                                            </>
+                                        )}
+
+                                        <button
+                                            onClick={handleSaveSettings}
+                                            style={{
+                                                width: '100%',
+                                                padding: '12px',
+                                                backgroundColor: 'var(--primary-color)',
+                                                color: 'white',
+                                                border: 'none',
+                                                borderRadius: '6px',
+                                                fontSize: '14px',
+                                                fontWeight: '600',
+                                                cursor: 'pointer',
+                                                marginTop: '8px'
+                                            }}
+                                        >
+                                            Save Automation Settings
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </>
                 )}
 

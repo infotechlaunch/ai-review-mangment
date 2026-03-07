@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react'
-import { apiRequest } from '../../utils/api'
+import { apiRequest, cachedApiRequest, invalidateCache } from '../../utils/api'
+import './dashboard.css'
+import './common.css'
 
 export default function Dashboard() {
     const [stats, setStats] = useState({
@@ -25,6 +27,7 @@ export default function Dashboard() {
         setSyncMessage('🔄 Syncing...');
         
         try {
+            invalidateCache('/api/client/reviews') // force fresh data after sync
             const data = await apiRequest('/api/reviews/fetch-places', {
                 method: 'POST',
                 body: JSON.stringify({})
@@ -49,10 +52,7 @@ export default function Dashboard() {
     const fetchDashboardData = async () => {
         try {
             setLoading(true)
-            console.log('🔄 Fetching dashboard data...')
-            
-            const result = await apiRequest('/api/client/reviews')
-            console.log('📊 API Response:', result)
+            const result = await cachedApiRequest('/api/client/reviews')
 
             if (result.success && result.data) {
                 if (result.data.client) {
@@ -60,11 +60,6 @@ export default function Dashboard() {
                 }
 
                 const reviews = result.data.reviews || result.data || []
-                console.log(`✅ Received ${reviews.length} reviews`)
-                
-                if (reviews.length > 0) {
-                    console.log('📝 Sample review:', reviews[0])
-                }
                 
                 const totalReviews = reviews.length
 
@@ -91,12 +86,7 @@ export default function Dashboard() {
                     ? (ratingsSum / totalReviews).toFixed(1)
                     : 0
 
-                console.log('📈 Calculated stats:', {
-                    totalReviews,
-                    sentimentSummary,
-                    responseRate,
-                    avgRating
-                })
+
 
                 setStats({
                     totalReviews,
@@ -106,7 +96,6 @@ export default function Dashboard() {
                 })
 
                 const trendsData = calculateMonthlyTrends(reviews)
-                console.log('📊 Trends data:', trendsData)
                 setRecentTrends(trendsData)
 
                 setPlatformStats([{
@@ -190,11 +179,35 @@ export default function Dashboard() {
                 <div className="page-header">
                     <div>
                         <h1 className="page-title">Dashboard</h1>
-                        <p className="page-subtitle">Monitor and analyze your AI review management metrics at a glance</p>
+                        <p className="page-subtitle">Monitor and analyze your Auto Review metrics at a glance</p>
                     </div>
                 </div>
-                <div className="loading-message">
-                    Loading your review metrics...
+
+                {/* Metric card skeletons */}
+                <div className="metrics-grid" style={{ marginBottom: 24 }}>
+                    {[1,2,3,4].map(i => (
+                        <div key={i} className="metric-card skeleton-card">
+                            <div className="skeleton skeleton-title" />
+                            <div className="skeleton skeleton-value" />
+                            <div className="skeleton skeleton-sub" />
+                        </div>
+                    ))}
+                </div>
+
+                {/* Chart skeletons */}
+                <div className="charts-grid">
+                    <div className="skeleton-card" style={{ padding: 24 }}>
+                        <div className="skeleton skeleton-title" />
+                        {[1,2,3].map(i => (
+                            <div key={i} className="skeleton skeleton-row" />
+                        ))}
+                    </div>
+                    <div className="skeleton-card" style={{ padding: 24 }}>
+                        <div className="skeleton skeleton-title" />
+                        {[1,2].map(i => (
+                            <div key={i} className="skeleton skeleton-row" />
+                        ))}
+                    </div>
                 </div>
             </div>
         )
@@ -206,7 +219,7 @@ export default function Dashboard() {
             <div className="page-header">
                 <div>
                     <h1 className="page-title">Dashboard</h1>
-                    <p className="page-subtitle">Monitor and analyze your AI review management metrics at a glance</p>
+                    <p className="page-subtitle">Monitor and analyze your Auto Review metrics at a glance</p>
                 </div>
                 <div className="header-actions" style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
                     {syncMessage && (
@@ -220,7 +233,7 @@ export default function Dashboard() {
                             {syncMessage}
                         </span>
                     )}
-                    <button
+                    {/* <button
                         onClick={syncFromPlaces}
                         disabled={isSyncing}
                         style={{
@@ -238,7 +251,7 @@ export default function Dashboard() {
                         }}
                     >
                         {isSyncing ? '🔄 Syncing...' : '🔍 Sync Google (Places)'}
-                    </button>
+                    </button> */}
                     <span className="user-badge">
                         {clientInfo?.businessName || localStorage.getItem('businessName') || 'Client'}
                     </span>

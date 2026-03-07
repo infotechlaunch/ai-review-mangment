@@ -2,6 +2,85 @@
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 
+// ─── In-memory cache with stale-while-revalidate ─────────────────────────────
+const _cache = new Map();
+const DEFAULT_TTL = 60_000; // 60 seconds – fresh window
+
+/**
+ * Same as apiRequest but returns cached data instantly when available.
+ * In-flight requests are deduplicated – two simultaneous calls for the same
+ * endpoint share a single network request.
+ * Stale data is returned immediately while a background refresh runs.
+ *
+ * @param {string} endpoint
+ * @param {Object} options  – fetch options (cache only applies to GET requests)
+ * @param {number} ttl      – ms before an entry is considered stale
+ */
+export const cachedApiRequest = async (endpoint, options = {}, ttl = DEFAULT_TTL) => {
+    const method = (options.method || 'GET').toUpperCase();
+    if (method !== 'GET') {
+        return apiRequest(endpoint, options);
+    }
+
+    const now = Date.now();
+    const entry = _cache.get(endpoint);
+
+    if (entry) {
+        // In-flight deduplication: return the shared promise
+        if (entry.promise) return entry.promise;
+
+        const isStale = now - entry.timestamp > ttl;
+        if (!isStale) {
+            return entry.data; // Fresh hit – instant return
+        }
+        // Stale: return existing data immediately, refresh in background
+        _backgroundRefresh(endpoint, options);
+        return entry.data;
+    }
+
+    // No cache yet – fire network request and store the promise so concurrent
+    // callers join it instead of creating duplicate requests.
+    const promise = apiRequest(endpoint, options)
+        .then(data => {
+            _cache.set(endpoint, { data, timestamp: Date.now() });
+            return data;
+        })
+        .catch(err => {
+            _cache.delete(endpoint); // Don't cache errors
+            throw err;
+        });
+
+    _cache.set(endpoint, { promise });
+    return promise;
+};
+
+/** Silently refresh a cache entry in the background */
+const _backgroundRefresh = (endpoint, options) => {
+    const refresh = apiRequest(endpoint, options)
+        .then(data => _cache.set(endpoint, { data, timestamp: Date.now() }))
+        .catch(() => { /* swallow – stale data is still usable */ });
+
+    // Store as in-flight so any concurrent request joins it
+    const current = _cache.get(endpoint);
+    if (current) _cache.set(endpoint, { ...current, promise: refresh });
+};
+
+/**
+ * Invalidate one or all cache entries.
+ * Call after mutations (sync, reply updates, etc.) so the next read
+ * fetches fresh data.
+ *
+ * @param {string} [endpoint] – omit to clear the entire cache
+ */
+export const invalidateCache = (endpoint) => {
+    if (endpoint) {
+        _cache.delete(endpoint);
+    } else {
+        _cache.clear();
+    }
+};
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
  * Get authentication headers with JWT token
  * @returns {Object} Headers object with Authorization token
@@ -85,6 +164,8 @@ export default {
     API_BASE_URL,
     getAuthHeaders,
     apiRequest,
+    cachedApiRequest,
+    invalidateCache,
     isAuthenticated,
     getUserRole,
     logout

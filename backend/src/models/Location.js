@@ -57,6 +57,6 @@ const Location = sequelize.define('Location', {
 
 // Association
 Location.belongsTo(Tenant, { foreignKey: 'tenantId', as: 'tenant' });
-Tenant.hasMany(Location, { foreignKey: 'tenantId' });
+Tenant.hasMany(Location, { foreignKey: 'tenantId', as: 'locations' });
 
 module.exports = Location;

@@ -1,138 +1,261 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './BusinessSetup.css';
 import { apiRequest } from '../../utils/api';
 
+const TOTAL_STEPS = 4;
+
 const BusinessSetup = () => {
     const [currentStep, setCurrentStep] = useState(1);
     const [businessData, setBusinessData] = useState({
-        // Step 1: Business Info
+        // -- Step 1: Business Info (user-visible) --
         businessName: '',
         industry: '',
+        address: '',
+        city: '',
+        country: '',
         phone: '',
         website: '',
-        address: '',
-        timezone: '',
-        logo: null,
 
-        // Step 2: Location & Connect
-        googleLocation: null,
+        // -- Step 2: Google Search Name (user-visible) --
+        googleSearchName: '',
 
-        // Step 3: Communication
-        whatsappNumber: '',
-        whatsappLink: '',
-        sendRequestsViaWhatsapp: true,
-        sendFollowupsViaWhatsapp: true,
-
-        // Step 4: Social & Review Presence
+        // -- Step 3: Social Links (user-visible) --
         facebookPage: '',
         instagramHandle: '',
-        googleReviewLink: '',
-        gmbConnName: '',
-        fbConnName: '',
-        igConnName: '',
+
+        // -- Hidden / Backend-managed technical fields --
+        // These are fetched/saved automatically. Never shown to user.
         placeId: '',
+        googleReviewLink: '',
         account_resource: '',
         locationId: '',
         ReviewKey: '',
         gid: '',
         ScreenshotOneHTML: '',
+        rating: null,
+        reviewsCount: 0,
 
-        // Step 5: Permissions
+        // WhatsApp (carry-over, kept internal)
+        whatsappNumber: '',
+        whatsappLink: '',
+
+        // Permissions
         permissions: {
             allowAiResponse: true,
             allowReviewRequests: true,
             allowWhatsappFollowups: true,
-            allowMonitoring: true,
             allowPosting: true
         }
     });
 
-    const [isConnecting, setIsConnecting] = useState(false);
+    const [isSearching, setIsSearching] = useState(false);
+    const [searchStatus, setSearchStatus] = useState(null); // null | 'success' | 'error'
+    const [searchMessage, setSearchMessage] = useState('');
+    const [isSaving, setIsSaving] = useState(false);
+    const [showManualEntry, setShowManualEntry] = useState(false);
+
+    // Dropdown suggestion state
+    const [suggestions, setSuggestions] = useState([]);
+    const [showDropdown, setShowDropdown] = useState(false);
+    const [selectedResult, setSelectedResult] = useState(null);
+    const debounceRef = useRef(null);
+    const dropdownRef = useRef(null);
+
     const navigate = useNavigate();
 
-    // Load existing business data from backend on component mount
+    // --- Close dropdown when clicking outside ---------------------------------
+    useEffect(() => {
+        const handleClickOutside = (e) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+                setShowDropdown(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    // --- Load existing profile from backend on mount ---------------------------
     useEffect(() => {
         const fetchProfile = async () => {
             try {
                 const response = await apiRequest('/api/tenant/profile', { method: 'GET' });
                 if (response.success && response.data) {
-                    const tenant = response.data;
+                    const t = response.data;
+                    const sp = t.social_profiles || {};
+                    const comm = t.communication_settings || {};
+
                     setBusinessData(prev => ({
                         ...prev,
-                        businessName: tenant.businessName || '',
-                        industry: tenant.industry || '',
-                        phone: tenant.phone || '',
-                        website: tenant.website || '',
-                        address: tenant.address || '',
-                        timezone: tenant.timezone || '',
-                        // Map nested fields
-                        whatsappNumber: tenant.communication_settings?.whatsappNumber || '',
-                        whatsappLink: tenant.communication_settings?.whatsappLink || '',
-                        sendRequestsViaWhatsapp: tenant.communication_settings?.sendRequestsViaWhatsapp ?? true,
-                        sendFollowupsViaWhatsapp: tenant.communication_settings?.sendFollowupsViaWhatsapp ?? true,
-                        facebookPage: tenant.social_profiles?.facebookPage || '',
-                        instagramHandle: tenant.social_profiles?.instagramHandle || '',
-                        googleReviewLink: tenant.social_profiles?.googleReviewLink || '',
-                        gmbConnName: tenant.social_profiles?.gmbConnName || '',
-                        fbConnName: tenant.social_profiles?.fbConnName || '',
-                        igConnName: tenant.social_profiles?.igConnName || '',
-                        placeId: tenant.social_profiles?.placeId || '',
-                        account_resource: tenant.social_profiles?.account_resource || '',
-                        locationId: tenant.social_profiles?.locationId || '',
-                        ReviewKey: tenant.social_profiles?.ReviewKey || '',
-                        gid: tenant.social_profiles?.gid || '',
-                        ScreenshotOneHTML: tenant.social_profiles?.ScreenshotOneHTML || '',
-                        // Map permissions
-                        permissions: {
-                            ...prev.permissions,
-                            ...(tenant.settings?.permissions || {})
-                        }
+                        businessName: t.businessName || '',
+                        industry: t.industry || '',
+                        address: t.address || '',
+                        city: t.city || '',
+                        country: t.country || '',
+                        phone: t.phone || '',
+                        website: t.website || '',
+                        googleSearchName: t.googleSearchName || '',
+
+                        facebookPage: sp.facebookPage || t.facebookPage || '',
+                        instagramHandle: sp.instagramHandle || t.instagramHandle || '',
+
+                        // Restore technical fields silently
+                        placeId: sp.placeId || t.placeId || '',
+                        googleReviewLink: sp.googleReviewLink || t.googleReviewLink || '',
+                        account_resource: sp.account_resource || t.account_resource || '',
+                        locationId: sp.locationId || t.locationId || '',
+                        ReviewKey: sp.ReviewKey || t.ReviewKey || '',
+                        gid: sp.gid || t.gid || '',
+                        ScreenshotOneHTML: sp.ScreenshotOneHTML || t.ScreenshotOneHTML || '',
+                        rating: sp.rating || null,
+                        reviewsCount: sp.reviewsCount || 0,
+
+                        whatsappNumber: comm.whatsappNumber || '',
+                        whatsappLink: comm.whatsappLink || '',
                     }));
+
+                    // If placeId is already saved, show success status
+                    if (sp.placeId || t.placeId) {
+                        setSearchStatus('success');
+                        setSearchMessage(`Google Business connected (Place ID: ${sp.placeId || t.placeId})`);
+                    }
                 }
             } catch (error) {
                 console.error('Failed to fetch business profile:', error);
-                // Fallback to local storage if needed
-                const existingBusinessName = localStorage.getItem('businessName');
-                if (existingBusinessName) {
-                    setBusinessData(prev => ({ ...prev, businessName: existingBusinessName }));
-                }
+                const saved = localStorage.getItem('businessName');
+                if (saved) setBusinessData(prev => ({ ...prev, businessName: saved }));
             }
         };
-
         fetchProfile();
     }, []);
 
+    // --- Input handlers --------------------------------------------------------
     const handleInputChange = (e) => {
         const { name, value } = e.target;
-        setBusinessData(prev => ({
-            ...prev,
-            [name]: value
-        }));
+        setBusinessData(prev => ({ ...prev, [name]: value }));
     };
 
-    const handleCheckboxChange = (e) => {
-        const { name, checked } = e.target;
-        setBusinessData(prev => ({
-            ...prev,
-            [name]: checked
-        }));
-    };
+    // --- Live suggestions as user types (debounced 400ms) ---------------------
+    const handleGoogleSearchInput = (e) => {
+        const value = e.target.value;
+        setBusinessData(prev => ({ ...prev, googleSearchName: value }));
+        setSearchStatus(null);
+        setSearchMessage('');
+        setSuggestions([]);
+        setShowDropdown(false);
 
-    const handlePermissionChange = (e) => {
-        const { name, checked } = e.target;
-        setBusinessData(prev => ({
-            ...prev,
-            permissions: {
-                ...prev.permissions,
-                [name]: checked
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+        if (value.trim().length < 2) return;
+
+        debounceRef.current = setTimeout(async () => {
+            try {
+                const res = await apiRequest(
+                    `/api/onboarding/search-suggestions?q=${encodeURIComponent(value.trim())}`,
+                    { method: 'GET' }
+                );
+                if (res.success && res.results?.length > 0) {
+                    setSuggestions(res.results);
+                    setShowDropdown(true);
+                }
+            } catch {
+                // silently ignore suggestion errors
             }
-        }));
+        }, 400);
     };
 
+    // --- Select a suggestion from the dropdown --------------------------------
+    const handleSelectSuggestion = async (result) => {
+        setSuggestions([]);
+        setShowDropdown(false);
+        setBusinessData(prev => ({ ...prev, googleSearchName: result.title }));
+
+        try {
+            setIsSearching(true);
+            setSearchStatus(null);
+            setSearchMessage('');
+
+            const response = await apiRequest('/api/onboarding/search-place', {
+                method: 'POST',
+                body: JSON.stringify({ googleSearchName: result.title })
+            });
+
+            if (response.success && response.data) {
+                const { placeId, googleReviewLink, gid, rating, reviewsCount, businessTitle, address } = response.data;
+                setBusinessData(prev => ({
+                    ...prev,
+                    placeId,
+                    googleReviewLink,
+                    gid: gid || prev.gid,
+                    rating,
+                    reviewsCount,
+                    address: prev.address || address || prev.address
+                }));
+                setSearchStatus('success');
+                setSearchMessage(`Found "${businessTitle}" - Place ID saved automatically ✅`);
+            } else {
+                setSearchStatus('error');
+                setSearchMessage(response.message || 'Business not found. Try a more specific search name.');
+            }
+        } catch (error) {
+            console.error('Select suggestion error:', error);
+            setSearchStatus('error');
+            setSearchMessage('Failed to connect. Please check your connection and try again.');
+        } finally {
+            setIsSearching(false);
+        }
+    };
+
+    // --- SearchApi: auto-fetch placeId ----------------------------------------
+    const handleSearchPlace = async () => {
+        if (!businessData.googleSearchName.trim()) {
+            setSearchStatus('error');
+            setSearchMessage('Please enter a search name first.');
+            return;
+        }
+
+        try {
+            setIsSearching(true);
+            setSearchStatus(null);
+            setSearchMessage('');
+
+            const response = await apiRequest('/api/onboarding/search-place', {
+                method: 'POST',
+                body: JSON.stringify({ googleSearchName: businessData.googleSearchName.trim() })
+            });
+
+            if (response.success && response.data) {
+                const { placeId, googleReviewLink, gid, rating, reviewsCount, businessTitle, address } = response.data;
+
+                setBusinessData(prev => ({
+                    ...prev,
+                    placeId,
+                    googleReviewLink,
+                    gid: gid || prev.gid,
+                    rating,
+                    reviewsCount,
+                    // Pre-fill address from Google result if user left it blank
+                    address: prev.address || address || prev.address
+                }));
+
+                setSearchStatus('success');
+                setSearchMessage(`Found "${businessTitle}" - Place ID saved automatically ✅`);
+            } else {
+                setSearchStatus('error');
+                setSearchMessage(response.message || 'Business not found. Try a more specific search name.');
+            }
+        } catch (error) {
+            console.error('Search place error:', error);
+            setSearchStatus('error');
+            setSearchMessage('Failed to search. Please check your connection and try again.');
+        } finally {
+            setIsSearching(false);
+        }
+    };
+
+    // --- Step navigation -------------------------------------------------------
     const handleNext = () => {
-        if (currentStep < 5) {
-            setCurrentStep(currentStep + 1);
+        if (currentStep < TOTAL_STEPS) {
+            setCurrentStep(s => s + 1);
             window.scrollTo(0, 0);
         } else {
             completeOnboarding();
@@ -141,29 +264,57 @@ const BusinessSetup = () => {
 
     const handleBack = () => {
         if (currentStep > 1) {
-            setCurrentStep(currentStep - 1);
+            setCurrentStep(s => s - 1);
             window.scrollTo(0, 0);
         }
     };
 
+    const canProceed = () => {
+        if (currentStep === 1) {
+            return businessData.businessName.trim() !== '' &&
+                   businessData.city.trim() !== '' &&
+                   businessData.country.trim() !== '';
+        }
+        return true; // Steps 2-4 are optional or handled by their own actions
+    };
+
+    // --- Final save ------------------------------------------------------------
     const completeOnboarding = async () => {
         try {
-            // Save to backend
+            setIsSaving(true);
+            const payload = {
+                businessName: businessData.businessName,
+                industry: businessData.industry,
+                address: businessData.address,
+                city: businessData.city,
+                country: businessData.country,
+                phone: businessData.phone,
+                website: businessData.website,
+                googleSearchName: businessData.googleSearchName,
+                facebookPage: businessData.facebookPage,
+                instagramHandle: businessData.instagramHandle,
+                googleReviewLink: businessData.googleReviewLink,
+                // Technical fields (hidden from user but synced to DB + Sheets)
+                placeId: businessData.placeId,
+                account_resource: businessData.account_resource,
+                locationId: businessData.locationId,
+                ReviewKey: businessData.ReviewKey,
+                gid: businessData.gid,
+                ScreenshotOneHTML: businessData.ScreenshotOneHTML,
+                permissions: businessData.permissions
+            };
+
             const response = await apiRequest('/api/tenant/profile', {
                 method: 'PUT',
-                body: JSON.stringify(businessData)
+                body: JSON.stringify(payload)
             });
 
             if (response.success) {
-                console.log('Profile updated successfully');
-                
-                // Save basic info to localStorage as backup/cache
                 localStorage.setItem('businessName', businessData.businessName);
-                if (businessData.industry) localStorage.setItem('businessIndustry', businessData.industry);
-                
-                // Navigate to dashboard
+                if (businessData.placeId) localStorage.setItem('placeId', businessData.placeId);
+
                 const userRole = localStorage.getItem('userRole');
-                if (userRole === 'ADMIN') {
+                if (userRole === 'ADMIN' || userRole === 'SUPER_ADMIN') {
                     navigate('/admin');
                 } else {
                     navigate('/');
@@ -174,271 +325,343 @@ const BusinessSetup = () => {
         } catch (error) {
             console.error('Error completing onboarding:', error);
             alert('An error occurred while saving your profile.');
-        }
-    };
-
-    const canProceed = () => {
-        if (currentStep === 1) {
-            return businessData.businessName && businessData.industry;
-        }
-        // Add validation for other steps if needed
-        return true;
-    };
-
-    const handleGoogleConnect = async () => {
-        try {
-            setIsConnecting(true);
-            const tenantId = localStorage.getItem('tenantId');
-
-            if (!tenantId) {
-                alert('Session expired. Please register again.');
-                navigate('/login');
-                return;
-            }
-
-            // existing logic
-            const response = await fetch(`http://localhost:4000/api/google-oauth/connect-onboarding/${tenantId}`, {
-                method: 'GET',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            const data = await response.json();
-
-            if (data.success && data.authUrl) {
-                window.location.href = data.authUrl;
-            } else {
-                alert('Failed to initiate Google connection. Please try again.');
-            }
-        } catch (error) {
-            console.error('Google connect error:', error);
-            alert('Failed to connect to Google. Please try again.');
         } finally {
-            setIsConnecting(false);
+            setIsSaving(false);
         }
     };
+
+    // --- Progress bar ----------------------------------------------------------
+    const stepLabels = ['Business', 'Google', 'Social', 'Finish'];
 
     const renderProgressBar = () => (
         <div className="progress-section">
             <div className="progress-steps">
-                {[1, 2, 3, 4, 5].map((step) => (
-                    <div
-                        key={step}
-                        className={`progress-step ${currentStep >= step ? 'active' : ''}`}
-                    >
-                        <div className="step-circle">{step}</div>
-                        <div className="step-label">
-                            {step === 1 && 'Info'}
-                            {step === 2 && 'Comms'}
-                            {step === 3 && 'Social'}
-                            {step === 4 && 'Perms'}
-                            {step === 5 && 'Finish'}
+                {stepLabels.map((label, idx) => {
+                    const step = idx + 1;
+                    return (
+                        <div
+                            key={step}
+                            className={`progress-step ${currentStep >= step ? 'active' : ''}`}
+                        >
+                            <div className="step-circle">
+                                {currentStep > step ? '✓' : step}
+                            </div>
+                            <div className="step-label">{label}</div>
                         </div>
-                    </div>
-                ))}
+                    );
+                })}
             </div>
             <div className="progress-bar">
                 <div
                     className="progress-fill"
-                    style={{ width: `${((currentStep - 1) / 4) * 100}%` }}
+                    style={{ width: `${((currentStep - 1) / (TOTAL_STEPS - 1)) * 100}%` }}
                 />
             </div>
         </div>
     );
 
+    // --- Render ----------------------------------------------------------------
     return (
         <div className="onboarding-container">
             <div className="onboarding-card">
                 {renderProgressBar()}
 
                 <div className="step-content">
-                    {/* STEP 1: BUSINESS INFO */}
+
+                    {/* =======================================================
+                        STEP 1 - Business Info
+                    ======================================================= */}
                     {currentStep === 1 && (
                         <div className="step-1 fade-in">
-                            <h2>Let's get to know your business</h2>
-                            <p className="step-description">We'll need a few details to set up your profile.</p>
+                            <h2>Tell us about your business</h2>
+                            <p className="step-description">We'll use this to set up your review profile.</p>
 
                             <div className="form-grid">
                                 <div className="form-group full-width">
-                                    <label>Business Name *</label>
+                                    <label>Business Name <span className="required">*</span></label>
                                     <input
                                         type="text"
                                         name="businessName"
                                         value={businessData.businessName}
                                         onChange={handleInputChange}
-                                        placeholder="e.g. Joy's Biryani House"
+                                        placeholder="e.g. Joy's Biryani N Kababs"
+                                        autoFocus
                                     />
-                                    <small>This is the name customers will see on your reviews</small>
-                                </div>
-
-                                <div className="form-group">
-                  <label>Industry / Category *</label>
-                  <select name="industry" value={businessData.industry} onChange={handleInputChange}>
-                    <option value="">Select Category</option>
-                    <option value="restaurant">Restaurant & Food</option>
-                    <option value="retail">Retail</option>
-                    <option value="healthcare">Healthcare</option>
-                    <option value="services">Professional Services</option>
-                    <option value="beauty">Beauty & Wellness</option>
-                    <option value="other">Other</option>
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <label>Logo (Optional)</label>
-                  <div className="file-input-wrapper">
-                    <input
-                      type="file"
-                      id="logo-upload"
-                      name="logo"
-                      accept="image/*"
-                      onChange={(e) => setBusinessData(prev => ({ ...prev, logo: e.target.files[0] }))}
-                      className="file-input"
-                    />
-                  </div>
-                </div>
-
-                <div className="form-group">
-                  <label>Phone Number</label>
-                                    <input
-                                        type="tel"
-                                        name="phone"
-                                        value={businessData.phone}
-                                        onChange={handleInputChange}
-                                        placeholder="+1 (555) 000-0000"
-                                    />
-                                </div>
-
-                                <div className="form-group">
-                                    <label>Website</label>
-                                    <input
-                                        type="url"
-                                        name="website"
-                                        value={businessData.website}
-                                        onChange={handleInputChange}
-                                        placeholder="https://example.com"
-                                    />
+                                    <small>The name customers see on your Google reviews</small>
                                 </div>
 
                                 <div className="form-group full-width">
-                                    <label>Business Address</label>
+                                    <label>Business Address <span className="optional">(optional)</span></label>
                                     <input
                                         type="text"
                                         name="address"
                                         value={businessData.address}
                                         onChange={handleInputChange}
-                                        placeholder="123 Main St, City, Country"
+                                        placeholder="Street address"
                                     />
                                 </div>
 
                                 <div className="form-group">
-                                    <label>Time Zone</label>
-                                    <select name="timezone" value={businessData.timezone} onChange={handleInputChange}>
-                                        <option value="">Select Timezone</option>
-                                        <option value="UTC-5">EST (New York)</option>
-                                        <option value="UTC-8">PST (Los Angeles)</option>
-                                        <option value="UTC+0">GMT (London)</option>
-                                        <option value="UTC+5:30">IST (India)</option>
+                                    <label>City <span className="required">*</span></label>
+                                    <input
+                                        type="text"
+                                        name="city"
+                                        value={businessData.city}
+                                        onChange={handleInputChange}
+                                        placeholder="e.g. Raigarh"
+                                    />
+                                </div>
+
+                                <div className="form-group">
+                                    <label>Country <span className="required">*</span></label>
+                                    <input
+                                        type="text"
+                                        name="country"
+                                        value={businessData.country}
+                                        onChange={handleInputChange}
+                                        placeholder="e.g. India"
+                                    />
+                                </div>
+
+                                <div className="form-group">
+                                    <label>Industry / Category</label>
+                                    <select name="industry" value={businessData.industry} onChange={handleInputChange}>
+                                        <option value="">Select Category (optional)</option>
+                                        <option value="restaurant">Restaurant & Food</option>
+                                        <option value="retail">Retail</option>
+                                        <option value="healthcare">Healthcare</option>
+                                        <option value="services">Professional Services</option>
+                                        <option value="beauty">Beauty & Wellness</option>
+                                        <option value="other">Other</option>
                                     </select>
                                 </div>
+
+                                <div className="form-group">
+                                    <label>Phone Number</label>
+                                    <input
+                                        type="tel"
+                                        name="phone"
+                                        value={businessData.phone}
+                                        onChange={handleInputChange}
+                                        placeholder="+91 98765 43210"
+                                    />
+                                </div>
                             </div>
                         </div>
                     )}
 
-            {/* STEP 2: CONNECT & LOCATION - HIDDEN 
+                    {/* =======================================================
+                        STEP 2 - Google Business Connect (SearchApi)
+                    ======================================================= */}
                     {currentStep === 2 && (
                         <div className="step-2 fade-in">
-                            <h2>Connect & Confirm Location</h2>
-                            <p className="step-description">Link your Google Business Profile to manage reviews.</p>
+                            <h2>Connect Google Business</h2>
+                            <p className="step-description">
+                                Enter your business search name so we can automatically find your Google listing,
+                                fetch your Place ID, and generate your review link - no manual entry needed.
+                            </p>
 
-                            <div className="connect-box">
+                            <div className="connect-box google-connect-box">
                                 <div className="platform-icon google">G</div>
                                 <div className="connect-info">
-                                    <h3>Google Business Profile</h3>
-                                    <p>Fetch reviews, reply automatically, and manage your reputation.</p>
+                                    <h3>Google Business <span className="badge-auto">Auto-Connect</span></h3>
+                                    <p>Enter a search name and we'll look up your business on Google Maps.</p>
                                 </div>
-                                <button
-                                    className="btn-connect"
-                                    onClick={handleGoogleConnect}
-                                    disabled={isConnecting}
-                                >
-                                    {isConnecting ? 'Connecting...' : 'Connect Google'}
-                                </button>
                             </div>
 
+                            <div className="form-group search-group" style={{ marginTop: '24px' }}>
+                                <label>
+                                    Business Search Name <span className="required">*</span>
+                                </label>
+                                <small style={{ display: 'block', marginBottom: '8px', color: '#6b7280' }}>
+                                    Use: <strong>Business Name + City</strong> for best results.
+                                    e.g. <em>"Joy's Biryani Raigarh"</em>
+                                </small>
+                                <div className="search-input-row" ref={dropdownRef} style={{ position: 'relative' }}>
+                                    <input
+                                        type="text"
+                                        name="googleSearchName"
+                                        value={businessData.googleSearchName}
+                                        onChange={handleGoogleSearchInput}
+                                        placeholder={`${businessData.businessName || 'Your Business'} ${businessData.city || 'City'}`}
+                                        disabled={isSearching}
+                                        autoComplete="off"
+                                    />
+                                    <button
+                                        className="btn-search-connect"
+                                        onClick={handleSearchPlace}
+                                        disabled={isSearching || !businessData.googleSearchName.trim()}
+                                    >
+                                        {isSearching ? (
+                                            <span>Searching<span className="dots-anim">...</span></span>
+                                        ) : (
+                                            'Search & Connect'
+                                        )}
+                                    </button>
+
+                                    {/* Live suggestions dropdown */}
+                                    {showDropdown && suggestions.length > 0 && (
+                                        <ul className="search-dropdown">
+                                            {suggestions.map((result, idx) => (
+                                                <li
+                                                    key={result.placeId || idx}
+                                                    className="search-dropdown-item"
+                                                    onMouseDown={() => handleSelectSuggestion(result)}
+                                                >
+                                                    <span className="dropdown-pin">
+                                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
+                                                            <circle cx="12" cy="10" r="3"/>
+                                                        </svg>
+                                                    </span>
+                                                    <span className="dropdown-text">
+                                                        <span className="dropdown-title">{result.title}</span>
+                                                        <span className="dropdown-address">{result.address}</span>
+                                                    </span>
+                                                    {result.rating && (
+                                                        <span className="dropdown-rating">⭐ {result.rating}</span>
+                                                    )}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Status feedback */}
+                            {searchStatus === 'success' && (
+                                <div className="status-banner status-success">
+                                    <span className="status-icon">✅</span>
+                                    <div>
+                                        <strong>Connected!</strong>
+                                        <p>{searchMessage}</p>
+                                        {businessData.googleReviewLink && (
+                                            <a
+                                                href={businessData.googleReviewLink}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="review-link-preview"
+                                            >
+                                                View Google Listing →
+                                            </a>
+                                        )}
+                                        {businessData.rating && (
+                                            <p className="google-stats">
+                                                ⭐ {businessData.rating} · {businessData.reviewsCount} reviews on Google
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            {searchStatus === 'error' && (
+                                <div className="status-banner status-error">
+                                    <span className="status-icon">❌</span>
+                                    <div>
+                                        <strong>Not found</strong>
+                                        <p>{searchMessage}</p>
+                                        <button
+                                            className="btn-manual-entry-link"
+                                            onClick={() => setShowManualEntry(true)}
+                                        >
+                                            Can't find your business? Enter details manually →
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Manual entry form */}
+                            {showManualEntry && (
+                                <div className="manual-entry-box">
+                                    <div className="manual-entry-header">
+                                        <h4>Enter Business Details Manually</h4>
+                                        <button
+                                            className="btn-close-manual"
+                                            onClick={() => setShowManualEntry(false)}
+                                            aria-label="Close"
+                                        >✕</button>
+                                    </div>
+                                    <p className="manual-entry-hint">
+                                        We'll save these details so you can connect Google Business later from your dashboard.
+                                    </p>
+                                    <div className="manual-entry-fields">
+                                        <div className="form-group">
+                                            <label>Business Name <span className="required">*</span></label>
+                                            <input
+                                                type="text"
+                                                name="businessName"
+                                                value={businessData.businessName}
+                                                onChange={handleInputChange}
+                                                placeholder="e.g. Joy's Biryani N Kababs"
+                                            />
+                                        </div>
+                                        <div className="form-group">
+                                            <label>City <span className="required">*</span></label>
+                                            <input
+                                                type="text"
+                                                name="city"
+                                                value={businessData.city}
+                                                onChange={handleInputChange}
+                                                placeholder="e.g. Raigarh"
+                                            />
+                                        </div>
+                                        <div className="form-group">
+                                            <label>Full Address <span className="optional">(optional)</span></label>
+                                            <input
+                                                type="text"
+                                                name="address"
+                                                value={businessData.address}
+                                                onChange={handleInputChange}
+                                                placeholder="Street address"
+                                            />
+                                        </div>
+                                        <div className="form-group">
+                                            <label>Google Review Link <span className="optional">(optional)</span></label>
+                                            <input
+                                                type="url"
+                                                name="googleReviewLink"
+                                                value={businessData.googleReviewLink}
+                                                onChange={handleInputChange}
+                                                placeholder="https://g.page/r/..."
+                                            />
+                                            <small>Paste your Google Maps review link if you have it.</small>
+                                        </div>
+                                    </div>
+                                    <button
+                                        className="btn-save-manual"
+                                        onClick={() => {
+                                            setShowManualEntry(false);
+                                            setSearchStatus('success');
+                                            setSearchMessage(`"${businessData.businessName}" saved manually. Connect Google Business anytime from settings.`);
+                                        }}
+                                        disabled={!businessData.businessName.trim() || !businessData.city.trim()}
+                                    >
+                                        Save & Continue
+                                    </button>
+                                </div>
+                            )}
+
+                            <p className="skip-hint">
+                                You can skip this step and connect later from your dashboard settings.
+                            </p>
                         </div>
                     )}
-            */ }
 
-                    {/* STEP 2: COMMUNICATION SETUP */}
-                    {currentStep === 2 && (
-                        <div className="step-3 fade-in">
-                            <h2>WhatsApp Communication</h2>
-                            <p className="step-description">Engage your customers where they are active.</p>
-
-                            <div className="form-group">
-                                <label>WhatsApp Business Number</label>
-                                <input
-                                    type="text"
-                                    name="whatsappNumber"
-                                    value={businessData.whatsappNumber}
-                                    onChange={handleInputChange}
-                                    placeholder="+1 555 000 0000"
-                                />
-                            </div>
-
-                            <div className="form-group">
-                                <label>WhatsApp Chat Link (Optional)</label>
-                                <input
-                                    type="text"
-                                    name="whatsappLink"
-                                    value={businessData.whatsappLink}
-                                    onChange={handleInputChange}
-                                    placeholder="https://wa.me/..."
-                                />
-                            </div>
-
-                            <div className="toggles-section">
-                                <label className="toggle-row">
-                                    <div className="toggle-info">
-                                        <span className="toggle-title">Send review requests via WhatsApp</span>
-                                        <span className="toggle-desc">Automatically ask customers for reviews</span>
-                                    </div>
-                                    <input
-                                        type="checkbox"
-                                        name="sendRequestsViaWhatsapp"
-                                        checked={businessData.sendRequestsViaWhatsapp}
-                                        onChange={handleCheckboxChange}
-                                    />
-                                    <div className="toggle-switch"></div>
-                                </label>
-
-                                <label className="toggle-row">
-                                    <div className="toggle-info">
-                                        <span className="toggle-title">Send follow-up reminders</span>
-                                        <span className="toggle-desc">Remind customers who haven't reviewed</span>
-                                    </div>
-                                    <input
-                                        type="checkbox"
-                                        name="sendFollowupsViaWhatsapp"
-                                        checked={businessData.sendFollowupsViaWhatsapp}
-                                        onChange={handleCheckboxChange}
-                                    />
-                                    <div className="toggle-switch"></div>
-                                </label>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* STEP 3: SOCIAL & REVIEW PRESENCE */}
+                    {/* =======================================================
+                        STEP 3 - Social Links
+                    ======================================================= */}
                     {currentStep === 3 && (
-                        <div className="step-4 fade-in">
-                            <h2>Social & Review Presence</h2>
-                            <p className="step-description">Where should customers find you?</p>
+                        <div className="step-3 fade-in">
+                            <h2>Social Media Links</h2>
+                            <p className="step-description">
+                                Add your social profiles so customers can find you. Both fields are optional.
+                            </p>
 
-                            <div className="form-group">
-                                <label>Facebook Page URL</label>
+                            <div className="form-group social-group">
+                                <label>
+                                    <span className="social-icon facebook-icon">f</span>
+                                    Facebook Page URL
+                                </label>
                                 <input
                                     type="url"
                                     name="facebookPage"
@@ -448,8 +671,11 @@ const BusinessSetup = () => {
                                 />
                             </div>
 
-                            <div className="form-group">
-                                <label>Instagram Handle</label>
+                            <div className="form-group social-group">
+                                <label>
+                                    <span className="social-icon instagram-icon">in</span>
+                                    Instagram Handle
+                                </label>
                                 <input
                                     type="text"
                                     name="instagramHandle"
@@ -458,198 +684,113 @@ const BusinessSetup = () => {
                                     placeholder="@yourbusiness"
                                 />
                             </div>
-
-                            <div className="form-group">
-                                <label>Google Review Link</label>
-                                <input
-                                    type="url"
-                                    name="googleReviewLink"
-                                    value={businessData.googleReviewLink}
-                                    onChange={handleInputChange}
-                                    placeholder="https://g.page/..."
-                                />
-                                {/* <small>Auto-fetched if you connected Google in Step 2</small> */}
-                            </div>
-
-                            <hr style={{ margin: '20px 0', border: 'none', borderTop: '1px solid #e0e0e0' }} />
-                            <h3>Integration Details (Advanced)</h3>
-                            
-                            <div className="form-grid">
-                                <div className="form-group">
-                                    <label>GMB Connection Name</label>
-                                    <input type="text" name="gmbConnName" value={businessData.gmbConnName} onChange={handleInputChange} placeholder="e.g. GMB-Joys"/>
-                                </div>
-                                <div className="form-group">
-                                    <label>FB Connection Name</label>
-                                    <input type="text" name="fbConnName" value={businessData.fbConnName} onChange={handleInputChange} placeholder="e.g. FB-Joys"/>
-                                </div>
-                                <div className="form-group">
-                                    <label>IG Connection Name</label>
-                                    <input type="text" name="igConnName" value={businessData.igConnName} onChange={handleInputChange}/>
-                                </div>
-                                <div className="form-group full-width">
-                                    <label>Account Resource</label>
-                                    <input type="text" name="account_resource" value={businessData.account_resource} onChange={handleInputChange} placeholder="accounts/..."/>
-                                </div>
-                                <div className="form-group">
-                                    <label>Location ID</label>
-                                    <input type="text" name="locationId" value={businessData.locationId} onChange={handleInputChange}/>
-                                </div>
-                                <div className="form-group">
-                                    <label>Place ID</label>
-                                    <input type="text" name="placeId" value={businessData.placeId} onChange={handleInputChange}/>
-                                </div>
-                                <div className="form-group">
-                                    <label>Review Key</label>
-                                    <input type="text" name="ReviewKey" value={businessData.ReviewKey} onChange={handleInputChange}/>
-                                </div>
-                                <div className="form-group">
-                                    <label>GID</label>
-                                    <input type="text" name="gid" value={businessData.gid} onChange={handleInputChange}/>
-                                </div>
-                                <div className="form-group full-width">
-                                    <label>ScreenshotOne HTML</label>
-                                    <input type="text" name="ScreenshotOneHTML" value={businessData.ScreenshotOneHTML} onChange={handleInputChange}/>
-                                </div>
-                            </div>
                         </div>
                     )}
 
-                    {/* STEP 4: AUTOMATION PERMISSIONS */}
+                    {/* =======================================================
+                        STEP 4 - Preview & Finish
+                    ======================================================= */}
                     {currentStep === 4 && (
-                        <div className="step-5 fade-in">
-                            <h2>Permissions & Automation</h2>
-                            <p className="step-description">Control what our AI agents can do for you.</p>
-
-                            <div className="permissions-list">
-                                <label className="permission-item">
-                                    <input
-                                        type="checkbox"
-                                        name="allowAiResponse"
-                                        checked={businessData.permissions.allowAiResponse}
-                                        onChange={handlePermissionChange}
-                                    />
-                                    <div className="perm-content">
-                                        <span className="perm-title">Allow AI to reply to reviews</span>
-                                        <span className="perm-desc">AI will draft and post professional responses to customer reviews.</span>
-                                    </div>
-                                </label>
-
-                                <label className="permission-item">
-                                    <input
-                                        type="checkbox"
-                                        name="allowReviewRequests"
-                                        checked={businessData.permissions.allowReviewRequests}
-                                        onChange={handlePermissionChange}
-                                    />
-                                    <div className="perm-content">
-                                        <span className="perm-title">Allow sending review requests</span>
-                                        <span className="perm-desc">Automatically send SMS/WhatsApp requests to recent customers.</span>
-                                    </div>
-                                </label>
-
-                                <label className="permission-item">
-                                    <input
-                                        type="checkbox"
-                                        name="allowWhatsappFollowups"
-                                        checked={businessData.permissions.allowWhatsappFollowups}
-                                        onChange={handlePermissionChange}
-                                    />
-                                    <div className="perm-content">
-                                        <span className="perm-title">Allow WhatsApp follow-ups</span>
-                                        <span className="perm-desc">Send gentle reminders if customers haven't reviewed yet.</span>
-                                    </div>
-                                </label>
-
-                                <label className="permission-item">
-                                    <input
-                                        type="checkbox"
-                                        name="allowPosting"
-                                        checked={businessData.permissions.allowPosting}
-                                        onChange={handlePermissionChange}
-                                    />
-                                    <div className="perm-content">
-                                        <span className="perm-title">Auto-post replies on your behalf</span>
-                                        <span className="perm-desc">If unchecked, AI will only draft replies for approval.</span>
-                                    </div>
-                                </label>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* STEP 5: PREVIEW & FINISH */}
-                    {currentStep === 5 && (
-                        <div className="step-6 fade-in center-text">
-                            <div className="success-icon">🎉</div>
+                        <div className="step-4 fade-in center-text">
+                            {/* <div className="success-icon">🎉</div> */}
                             <h2>Your Review System is Ready!</h2>
-                            <p className="step-description">Here's a preview of your business profile.</p>
+                            <p className="step-description">Here's a summary of your business profile.</p>
 
                             <div className="business-preview-card">
                                 <div className="preview-header">
                                     <div className="preview-avatar">
-                                       {businessData.businessName.charAt(0) || "B"}
+                                        {businessData.businessName.charAt(0).toUpperCase() || 'B'}
                                     </div>
                                     <div className="preview-info">
-                                        <h3>{businessData.businessName || "Your Business"}</h3>
-                                        <p>{businessData.address || "Location not set"}</p>
-                                        <div className="preview-rating">
-                                            <span className="stars">⭐⭐⭐⭐⭐</span>
-                                            <span className="rating-text">5.0 (0 reviews)</span>
-                                        </div>
+                                        <h3>{businessData.businessName || 'Your Business'}</h3>
+                                        <p>
+                                            {[businessData.address, businessData.city, businessData.country]
+                                                .filter(Boolean)
+                                                .join(', ') || 'Location not set'}
+                                        </p>
+                                        {businessData.rating && (
+                                            <div className="preview-rating">
+                                                {/* <span className="stars">⭐</span> */}
+                                                <span className="rating-text">
+                                                    {businessData.rating} ({businessData.reviewsCount} Google reviews)
+                                                </span>
+                                            </div>
+                                        )}
                                     </div>
-                                </div>
-                                
-                                <div className="preview-actions">
-                                    <button className="preview-btn">Write a Review</button>
-                                    <button className="preview-btn secondary">Website</button>
                                 </div>
 
                                 <div className="setup-summary">
-                                    {/* <div className="summary-item">
-                                        <span className="label">Google Profile:</span>
-                                        <span className="value connected">Connected ✅</span>
-                                    </div> */}
                                     <div className="summary-item">
-                                        <span className="label">Automation:</span>
+                                        <span className="label">Google Business:</span>
+                                        <span className={`value ${businessData.placeId ? 'connected' : 'not-set'}`}>
+                                            {businessData.placeId ? 'Connected ' : 'Not connected '}
+                                        </span>
+                                    </div>
+                                    {businessData.googleReviewLink && (
+                                        <div className="summary-item">
+                                            <span className="label">Review Link:</span>
+                                            <a
+                                                href={businessData.googleReviewLink}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="value review-link-small"
+                                            >
+                                                Open ↗
+                                            </a>
+                                        </div>
+                                    )}
+                                    <div className="summary-item">
+                                        <span className="label">Facebook:</span>
                                         <span className="value">
-                                            {businessData.permissions.allowAiResponse ? "Active ⚡" : "Paused ⏸️"}
+                                            {businessData.facebookPage ? 'Added ' : 'Not set'}
                                         </span>
                                     </div>
                                     <div className="summary-item">
-                                        <span className="label">WhatsApp:</span>
+                                        <span className="label">Instagram:</span>
                                         <span className="value">
-                                            {businessData.whatsappNumber ? "Configured 📱" : "Not set"}
+                                            {businessData.instagramHandle ? `${businessData.instagramHandle}` : 'Not set'}
                                         </span>
+                                    </div>
+                                    <div className="summary-item">
+                                        <span className="label">AI Automation:</span>
+                                        <span className="value">Active </span>
                                     </div>
                                 </div>
                             </div>
 
                             <div className="final-actions">
-                                <button className="btn-primary full-width" onClick={completeOnboarding}>
-                                    Go to Dashboard
+                                <button
+                                    className="btn-primary full-width"
+                                    onClick={completeOnboarding}
+                                    disabled={isSaving}
+                                >
+                                    {isSaving ? 'Saving...' : 'Go to Dashboard '}
                                 </button>
-                                <button className="btn-secondary full-width" style={{ marginTop: '12px' }} onClick={completeOnboarding}>
-                                    Send First Review Request
-                                </button>
+                                {!businessData.placeId && (
+                                    <p className="finish-note">
+                                        Tip: Go back to Step 2 to connect Google Business and unlock review monitoring.
+                                    </p>
+                                )}
                             </div>
                         </div>
                     )}
+
                 </div>
 
-                {/* FOOTER NAV */}
+                {/* --- Footer Navigation --- */}
                 <div className="navigation-buttons">
-                    {currentStep > 1 && currentStep < 5 && (
+                    {currentStep > 1 && currentStep < TOTAL_STEPS && (
                         <button className="btn-secondary" onClick={handleBack}>
-                            Back
+                             Back
                         </button>
                     )}
-                    {currentStep < 5 && (
+                    {currentStep === TOTAL_STEPS ? null : (
                         <button
                             className="btn-primary"
                             onClick={handleNext}
                             disabled={!canProceed()}
                         >
-                            Next
+                            {currentStep === TOTAL_STEPS - 1 ? 'Preview ' : 'Next '}
                         </button>
                     )}
                 </div>

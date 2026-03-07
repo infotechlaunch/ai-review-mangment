@@ -2,12 +2,33 @@ const Review = require('../models/Review');
 const Location = require('../models/Location');
 const Tenant = require('../models/Tenant');
 const User = require('../models/User');
-const { generateReply } = require('../config/openai');
+const { generateReply, generateSocialCaption } = require('../config/openai');
 const { fetchGoogleReviews, postReplyToGoogle, fetchPlacesReviews, fetchReviewsFromSearchApi } = require('../services/googleBusinessService');
+const { runPipelineForReview, processPendingReviews } = require('../services/reviewPipelineService');
+const { postReviewToSocialMedia } = require('../services/facebookService');
 const { Op } = require('sequelize');
 
-// Import quota cooldown map from google_oauth_controller
-const { quotaCooldowns } = require('./google_oauth_controller');
+// Import quota helpers from google_oauth_controller
+const { quotaCooldowns, refreshTenantAccessToken, getGoogleAccountId, getOAuth2Client, fetchAndSaveLocations } = require('./google_oauth_controller');
+
+/**
+ * Get a valid (non-expired) access token for a tenant, refreshing if needed.
+ * @param {object} tenant  Sequelize Tenant instance with gbp_accessToken, gbp_tokenExpiry
+ * @returns {Promise<string>} valid access token
+ */
+async function getValidAccessToken(tenant) {
+    // Not connected at all
+    if (!tenant.gbp_accessToken && !tenant.gbp_refreshToken) {
+        throw new Error('GOOGLE_NOT_CONNECTED');
+    }
+    const expiry = tenant.gbp_tokenExpiry ? new Date(tenant.gbp_tokenExpiry) : null;
+    const bufferMs = 5 * 60 * 1000; // refresh 5 min before actual expiry
+    if (!expiry || Date.now() >= expiry.getTime() - bufferMs) {
+        console.log(`🔄 Access token expired for tenant ${tenant.slug || tenant.id}, refreshing…`);
+        return await refreshTenantAccessToken(tenant.id);
+    }
+    return tenant.gbp_accessToken;
+}
 
 /**
  * Review Controller
@@ -101,85 +122,20 @@ const fetchReviews = async (req, res) => {
                 await existingReview.save();
                 updatedReviewsCount++;
             } else {
-                // Create new review object
-                // Prepare review data structure
-                const reviewData = {
+                // Save new review, then kick off AI pipeline asynchronously
+                const newReview = await Review.create({
                     tenantId: location.tenant.id,
                     locationId: location.id,
                     ...googleReview,
-                };
-
-                // --- AI Auto-Reply Logic ---
-                let aiGenerated = {};
-
-                if (!reviewData.has_reply) {
-                    try {
-                        const tenantSettings = tenant.settings || {};
-                        const toneSettings = tenantSettings.tone || {};
-                        const autoApproval = tenantSettings.autoApproval || {
-                            positive: true,
-                            neutral: false,
-                            negative: false,
-                            minRating: 4
-                        };
-
-                        // Generate AI Reply
-                        const generatedReply = await generateReply(
-                            reviewData.review_text,
-                            reviewData.rating,
-                            tenant.businessName,
-                            toneSettings
-                        );
-
-                        reviewData.ai_generated_reply = generatedReply;
-                        reviewData.ai_reply_generated_at = new Date();
-                        reviewData.edited_reply = generatedReply;
-                        reviewData.final_caption = generatedReply;
-
-                        // Determine Sentiment (Simple Rating-based)
-                        let sentiment = 'NEUTRAL';
-                        if (reviewData.rating >= 4) sentiment = 'POSITIVE';
-                        else if (reviewData.rating <= 2) sentiment = 'NEGATIVE';
-
-                        reviewData.sentiment = sentiment; // Explicitly set sentiment if not from Google
-
-                        // Check Auto-Approval Rules
-                        let shouldAutoApprove = false;
-                        if (reviewData.rating >= (autoApproval.minRating || 4)) {
-                            if (sentiment === 'POSITIVE' && autoApproval.positive) shouldAutoApprove = true;
-                            if (sentiment === 'NEUTRAL' && autoApproval.neutral) shouldAutoApprove = true;
-                            if (sentiment === 'NEGATIVE' && autoApproval.negative) shouldAutoApprove = true;
-                        }
-
-                        if (shouldAutoApprove) {
-                            // Post to Google
-                            const postResult = await postReplyToGoogle(
-                                tenant.gbp_accountId,
-                                location.googleLocationId,
-                                reviewData.google_review_id,
-                                generatedReply,
-                                tenant.gbp_accessToken
-                            );
-
-                            reviewData.approval_status = 'posted';
-                            reviewData.posted_to_google = true;
-                            reviewData.posted_at = new Date();
-                            reviewData.google_reply_id = postResult.replyId;
-                            reviewData.has_reply = true;
-                            reviewData.approved_by = userId; // Attributed to the user triggering fetch, or system
-
-                            console.log(`✓ Auto-approved and posted reply for review ${reviewData.google_review_id}`);
-                        } else {
-                            console.log(`✓ Generated draft reply for review ${reviewData.google_review_id}`);
-                        }
-                    } catch (aiError) {
-                        console.error('Error in auto-reply generation:', aiError);
-                        // Continue saving review even if AI fails
-                    }
-                }
-
-                await Review.create(reviewData);
+                });
                 newReviewsCount++;
+
+                // Pipeline runs in the background — don't block the HTTP response
+                if (!googleReview.has_reply) {
+                    runPipelineForReview(newReview.id, userId).catch(err =>
+                        console.error(`[fetchReviews pipeline] review ${newReview.id}:`, err.message)
+                    );
+                }
             }
         }
 
@@ -475,7 +431,7 @@ const getReviewById = async (req, res) => {
         }
 
         // Ensure tenant access
-        if (userRole !== 'ADMIN' && review.tenant.id.toString() !== userTenant.toString()) {
+        if (userRole !== 'ADMIN' && review.tenantId.toString() !== userTenant.toString()) {
             return res.status(403).json({
                 success: false,
                 message: 'Access denied'
@@ -520,18 +476,10 @@ const generateAIReply = async (req, res) => {
         }
 
         // Ensure tenant access
-        if (userRole !== 'ADMIN' && review.tenant.id.toString() !== userTenant.toString()) {
+        if (userRole !== 'ADMIN' && review.tenantId.toString() !== userTenant.toString()) {
             return res.status(403).json({
                 success: false,
                 message: 'Access denied'
-            });
-        }
-
-        // Check if review already has a reply posted to Google
-        if (review.posted_to_google) {
-            return res.status(400).json({
-                success: false,
-                message: 'This review already has a reply posted to Google'
             });
         }
 
@@ -569,7 +517,7 @@ const generateAIReply = async (req, res) => {
         console.error('Error generating AI reply:', error);
         res.status(500).json({
             success: false,
-            message: 'Failed to generate AI reply',
+            message: error.message || 'Failed to generate AI reply',
             error: error.message
         });
     }
@@ -603,7 +551,7 @@ const approveAndPostReply = async (req, res) => {
         }
 
         // Ensure tenant access
-        if (userRole !== 'ADMIN' && review.tenant.id.toString() !== userTenant.toString()) {
+        if (userRole !== 'ADMIN' && review.tenantId.toString() !== userTenant.toString()) {
             return res.status(403).json({
                 success: false,
                 message: 'Access denied'
@@ -628,13 +576,75 @@ const approveAndPostReply = async (req, res) => {
             });
         }
 
-        // Post reply to Google
+        // Ensure we have a valid (non-expired) access token before posting
+        let accessToken;
+        try {
+            accessToken = await getValidAccessToken(review.tenant);
+        } catch (tokenErr) {
+            if (tokenErr.message === 'GOOGLE_NOT_CONNECTED') {
+                // Google not connected — save reply as approved so it's ready to post later
+                review.edited_reply = editedReply || review.edited_reply;
+                review.final_caption = replyToPost;
+                review.approved_by = userId;
+                review.approved_at = new Date();
+                review.approval_status = 'approved';
+                await review.save();
+                console.log(`⚠️  Reply saved as approved (Google not connected) for review ${review.id}`);
+                return res.json({
+                    success: true,
+                    googleNotConnected: true,
+                    message: 'Reply saved! Google Business Profile is not connected — reconnect Google to publish the reply.',
+                    data: { reviewId: review.id, finalCaption: replyToPost, approvalStatus: 'approved' }
+                });
+            }
+            throw tokenErr;
+        }
+
+        // Resolve Google account ID — fetch from API and cache if not yet stored
+        let accountId = review.tenant.gbp_accountId;
+        let locationId = review.location?.googleLocationId;
+
+        if (!accountId || !locationId) {
+            try {
+                const oauth2Client = getOAuth2Client();
+                oauth2Client.setCredentials({
+                    access_token: accessToken,
+                    refresh_token: review.tenant.gbp_refreshToken,
+                });
+
+                if (!accountId) {
+                    accountId = await getGoogleAccountId({ tenantId: review.tenantId, authClient: oauth2Client });
+                    // Refresh tenant in memory so postReplyToGoogle gets the right value
+                    review.tenant.gbp_accountId = accountId;
+                }
+
+                if (!locationId) {
+                    await fetchAndSaveLocations(review.tenant, oauth2Client, accountId);
+                    // Reload the location to get the newly-populated googleLocationId
+                    const updatedLocation = await require('../models/Location').findByPk(review.locationId);
+                    locationId = updatedLocation?.googleLocationId;
+                    if (!locationId) {
+                        return res.status(400).json({
+                            success: false,
+                            message: 'Google location ID not found. Please complete Google Business Profile setup in Settings.'
+                        });
+                    }
+                }
+            } catch (syncErr) {
+                if (syncErr.code === 'QUOTA_EXCEEDED' || syncErr.message === 'RATE_LIMITED_RETRY_LATER') {
+                    return res.status(429).json({ success: false, message: 'Google API quota exceeded. Please try again in a few minutes.' });
+                }
+                throw syncErr;
+            }
+        }
+
+        // Post reply to Google (use resolved accountId/locationId, not raw model fields which may be null)
         const postResult = await postReplyToGoogle(
-            review.tenant.gbp_accountId,
-            review.location.googleLocationId,
+            accountId,
+            locationId,
             review.google_review_id,
             replyToPost,
-            review.tenant.gbp_accessToken
+            accessToken
         );
 
         // Update review with approval and posting info
@@ -651,6 +661,31 @@ const approveAndPostReply = async (req, res) => {
 
         console.log(`✓ Reply approved and posted to Google for review ${review.id}`);
 
+        // Auto-post to social media if it's a 5-star review
+        let socialData = {};
+        if (review.rating >= 5) {
+            try {
+                const caption = await generateSocialCaption(
+                    review.review_text,
+                    review.reviewer_name,
+                    review.tenant.businessName
+                );
+                const { facebookPostUrl, instagramPostUrl } = await postReviewToSocialMedia({
+                    tenant: review.tenant,
+                    caption,
+                });
+                review.social_caption = caption;
+                review.facebook_post_url = facebookPostUrl || null;
+                review.instagram_post_url = instagramPostUrl || null;
+                review.social_posted_at = new Date();
+                await review.save();
+                socialData = { caption, facebookPostUrl, instagramPostUrl };
+                console.log(`✓ Auto-posted 5-star review to social media: FB=${facebookPostUrl}, IG=${instagramPostUrl}`);
+            } catch (socialErr) {
+                console.error('⚠️  Social auto-post failed (non-blocking):', socialErr.message);
+            }
+        }
+
         res.json({
             success: true,
             message: 'Reply approved and posted to Google successfully',
@@ -660,6 +695,7 @@ const approveAndPostReply = async (req, res) => {
                 editedReply: review.edited_reply,
                 approvedAt: review.approved_at,
                 postedAt: review.posted_at,
+                social: socialData,
             }
         });
 
@@ -896,6 +932,107 @@ const fetchReviewsFromThirdParty = async (req, res) => {
     }
 };
 
+/**
+ * Post a review to social media (Facebook / Instagram)
+ * Called manually OR auto-triggered after 5-star approval
+ * @route POST /api/reviews/:id/post-social
+ * @access CLIENT_OWNER, ADMIN
+ */
+const postToSocial = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const userRole = req.user.role;
+        const userTenant = req.user.tenant;
+
+        const review = await Review.findByPk(id, {
+            include: [{ model: Tenant, as: 'tenant' }]
+        });
+
+        if (!review) {
+            return res.status(404).json({ success: false, message: 'Review not found' });
+        }
+
+        if (userRole !== 'ADMIN' && review.tenantId.toString() !== userTenant.toString()) {
+            return res.status(403).json({ success: false, message: 'Access denied' });
+        }
+
+        // Generate social media caption using AI
+        const caption = await generateSocialCaption(
+            review.review_text,
+            review.reviewer_name,
+            review.tenant.businessName
+        );
+
+        // Post to Facebook and Instagram
+        const { facebookPostUrl, instagramPostUrl } = await postReviewToSocialMedia({
+            tenant: review.tenant,
+            caption,
+        });
+
+        // Save results to review
+        review.social_caption = caption;
+        review.facebook_post_url = facebookPostUrl || review.facebook_post_url;
+        review.instagram_post_url = instagramPostUrl || review.instagram_post_url;
+        review.social_posted_at = new Date();
+        await review.save();
+
+        console.log(`✓ Social post sent for review ${review.id}: FB=${facebookPostUrl}, IG=${instagramPostUrl}`);
+
+        return res.json({
+            success: true,
+            message: 'Review posted to social media successfully',
+            data: {
+                reviewId: review.id,
+                caption,
+                facebookPostUrl,
+                instagramPostUrl,
+                postedAt: review.social_posted_at,
+            }
+        });
+
+    } catch (error) {
+        console.error('Error posting to social media:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to post to social media',
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Manually trigger (or re-run) the AI pipeline for unprocessed reviews.
+ * @route POST /api/reviews/pipeline/run
+ * @access ADMIN, CLIENT_OWNER
+ */
+const runPipelineManually = async (req, res) => {
+    try {
+        const { reviewId } = req.body;  // optional — omit to process ALL pending
+        const userRole = req.user.role;
+        const userTenant = req.user.tenant;
+
+        if (reviewId) {
+            // Single review
+            const review = await Review.findByPk(reviewId);
+            if (!review) return res.status(404).json({ success: false, message: 'Review not found' });
+            if (userRole !== 'ADMIN' && review.tenantId.toString() !== userTenant.toString()) {
+                return res.status(403).json({ success: false, message: 'Access denied' });
+            }
+            const result = await runPipelineForReview(reviewId, req.user.userId);
+            return res.json({ success: true, message: 'Pipeline completed', data: result });
+        }
+
+        // Batch: restrict to the calling tenant unless admin
+        const tenantFilter = userRole === 'ADMIN' ? null : userTenant;
+        const result = await processPendingReviews(tenantFilter);
+        res.json({ success: true, message: 'Batch pipeline completed', data: result });
+
+    } catch (error) {
+        console.error('Error running pipeline:', error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     fetchReviews,
     fetchReviewsFromPlaces,
@@ -905,4 +1042,6 @@ module.exports = {
     generateAIReply,
     approveAndPostReply,
     updateReply,
+    postToSocial,
+    runPipelineManually,
 };

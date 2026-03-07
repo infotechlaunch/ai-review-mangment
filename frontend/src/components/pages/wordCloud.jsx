@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { apiRequest } from '../../utils/api'
+import { cachedApiRequest } from '../../utils/api'
 import './common.css'
 
 export default function WordCloud() {
@@ -39,7 +39,7 @@ export default function WordCloud() {
     const fetchWordCloudData = async () => {
         try {
             setLoading(true)
-            const result = await apiRequest('/api/client/reviews')
+            const result = await cachedApiRequest('/api/client/reviews')
 
             if (result.success && result.data) {
                 const reviews = result.data.reviews || result.data || []
@@ -68,7 +68,19 @@ export default function WordCloud() {
             <div className="page-container">
                 <div className="page-header">
                     <h1 className="page-title">Word Cloud</h1>
-                    <p className="page-subtitle">Loading word cloud data...</p>
+                    <p className="page-subtitle">Most-used words from your positive and negative reviews</p>
+                </div>
+                <div className="page-content">
+                    <div className="grid-container">
+                        {[1,2].map(i => (
+                            <div key={i} className="grid-col-6 skeleton-card">
+                                <div className="skeleton skeleton-title" />
+                                {[1,2,3,4,5].map(j => (
+                                    <div key={j} className="skeleton skeleton-line" style={{ width: `${60 + j*6}%` }} />
+                                ))}
+                            </div>
+                        ))}
+                    </div>
                 </div>
             </div>
         )

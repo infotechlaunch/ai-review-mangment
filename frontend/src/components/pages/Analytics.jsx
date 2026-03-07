@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { apiRequest } from '../../utils/api'
+import { cachedApiRequest } from '../../utils/api'
 import './Analytics.css'
+import './common.css'
 
 export default function Analytics() {
     const [stats, setStats] = useState({
@@ -15,7 +16,7 @@ export default function Analytics() {
     const fetchAnalyticsData = async () => {
         try {
             setLoading(true)
-            const result = await apiRequest('/api/client/reviews')
+            const result = await cachedApiRequest('/api/client/reviews')
 
             if (result.success && result.data) {
                 const reviews = result.data.reviews || result.data || []
@@ -151,7 +152,23 @@ export default function Analytics() {
             <div className="page-container">
                 <div className="page-header">
                     <h1 className="page-title">Analytics Dashboard</h1>
-                    <p className="page-subtitle">Loading analytics data...</p>
+                    <p className="page-subtitle">Access comprehensive analytics tools to gain insights from your customer reviews</p>
+                </div>
+                <div className="page-content">
+                    <div className="grid-container">
+                        {[1,2,3,4].map(i => (
+                            <div key={i} className="grid-col-3 skeleton-card">
+                                <div className="skeleton skeleton-title" />
+                                <div className="skeleton skeleton-value" />
+                                <div className="skeleton skeleton-sub" />
+                            </div>
+                        ))}
+                        {[1,2,3,4].map(i => (
+                            <div key={i} className="grid-col-3 skeleton-card" style={{ marginTop: 16 }}>
+                                <div className="skeleton skeleton-row" />
+                            </div>
+                        ))}
+                    </div>
                 </div>
             </div>
         )
