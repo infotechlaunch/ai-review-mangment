@@ -171,16 +171,19 @@ const Login = () => {
       }
     } catch (error) {
       console.error('Authentication error:', error);
-      setError('Failed to connect to server. Please make sure the backend is running on port 4000.');
+      setError('Failed to connect to server. Please check your internet connection or try again later.');
     } finally {
       setLoading(false);
     }
   };
 
   const handleOAuthLogin = (provider) => {
-    // Redirect to Google OAuth
+    // For Google OAuth, we MUST redirect directly to the Render backend.
+    // The production frontend is on Bluehost (static hosting) which cannot
+    // proxy browser-level redirects like OAuth - it just returns index.html.
+    const backendUrl = import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL || 'http://localhost:4000';
     if (provider === 'Google') {
-      window.location.href = `${api.API_BASE_URL}/api/auth/google`;
+      window.location.href = `${backendUrl}/api/auth/google`;
     } else {
       console.log(`${provider} login not yet implemented`);
       setError(`${provider} login is not yet available`);

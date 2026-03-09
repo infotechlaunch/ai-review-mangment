@@ -6,7 +6,12 @@
   RewriteCond %{HTTPS} off
   RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
   
-  # Handle React Router - redirect all requests to index.html
+  # EXCLUDE API and Health paths from React Router redirection
+  RewriteCond %{REQUEST_URI} ^/api/ [OR]
+  RewriteCond %{REQUEST_URI} ^/health$
+  RewriteRule ^ - [L]
+
+  # Handle React Router - redirect all other requests to index.html
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
   RewriteRule . /index.html [L]

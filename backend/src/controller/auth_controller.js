@@ -283,11 +283,20 @@ const googleCallback = async (req, res) => {
     try {
         const { code, error } = req.query;
 
+        // Detailed logging to help diagnose OAuth issues in production
+        console.log('=== Google OAuth Callback ===');
+        console.log('Query params received:', JSON.stringify(req.query));
+        console.log('Code present:', !!code);
+        console.log('Error param:', error || 'none');
+        console.log('Full URL:', req.protocol + '://' + req.get('host') + req.originalUrl);
+
         if (error) {
-            return res.redirect(`${frontendUrl}/login?error=${encodeURIComponent(error)}`);
+            console.error('Google returned error:', error);
+            return res.redirect(`${frontendUrl}/login?error=${encodeURIComponent('Google error: ' + error)}`);
         }
         if (!code) {
-            return res.redirect(`${frontendUrl}/login?error=${encodeURIComponent('Authorization code missing')}`);
+            console.error('No code received. All query params:', JSON.stringify(req.query));
+            return res.redirect(`${frontendUrl}/login?error=${encodeURIComponent('Authorization code missing - no params received from Google')}`);
         }
 
         const oauth2Client = new google.auth.OAuth2(

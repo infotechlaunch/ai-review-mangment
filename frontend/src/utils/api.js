@@ -1,6 +1,6 @@
 // API Configuration and Utility Functions
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+const API_BASE_URL = import.meta.env.VITE_API_URL ;
 
 // ─── In-memory cache with stale-while-revalidate ─────────────────────────────
 const _cache = new Map();
